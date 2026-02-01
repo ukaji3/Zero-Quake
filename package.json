@@ -21,10 +21,6 @@
     ],
     "win": {
       "icon": "src/img/icon.ico",
-      "publish": {
-        "provider": "github",
-        "owner": "{USER_NAME}"
-      },
       "target": {
         "target": "nsis"
       }
