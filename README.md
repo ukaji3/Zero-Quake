@@ -5,7 +5,7 @@
 ![](https://img.shields.io/github/downloads/0quake/Zero-Quake/total)
 ![](https://img.shields.io/github/v/release/0Quake/Zero-Quake)
 ![](https://img.shields.io/github/license/0quake/Zero-Quake)
-![](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue)
+![](https://img.shields.io/badge/platform-Linux-blue)
 
 ## このリポジトリについて
 
@@ -18,7 +18,6 @@
 
 ## 対応プラットフォーム
 
-- **Windows** 10/11 (x64)
 - **Linux** Ubuntu 20.04 LTS 以降 (GNOME デスクトップ環境)
 
 ### Linux (Ubuntu) インストール
