@@ -156,6 +156,7 @@ function configDataDraw() {
 
   document.getElementById("VoiceEngine_" + config.notice.voice_parameter.engine).checked = true;
   document.getElementById("Boyomi_Port").value = config.notice.voice_parameter.Boyomi_Port;
+  document.getElementById("CustomCommand").value = config.notice.voice_parameter.CustomCommand || "espeak-ng -v ja '{text}'";
 
   document.getElementById("NotificationSound").checked = config.Info.EQInfo.NotificationSound;
   selectBoxSet(document.getElementById("maxI_threshold"), config.Info.EQInfo.maxI_threshold);
@@ -332,6 +333,7 @@ function apply() {
   }
   config.notice.voice_parameter.Boyomi_Port = Math.floor(Number(document.getElementById("Boyomi_Port").value));
   config.notice.voice_parameter.Boyomi_Voice = document.getElementById("BoyomiVoiceSelect").value;
+  config.notice.voice_parameter.CustomCommand = document.getElementById("CustomCommand").value;
 
   config.Info.EQInfo.NotificationSound = document.getElementById("NotificationSound").checked;
   config.Info.EQInfo.maxI_threshold = document.getElementById("maxI_threshold").value;
@@ -944,7 +946,24 @@ function speak(text, engine) {
         engine = VoiceEngine_Elm.item(i).value;
     }
   }
-  if (engine == "Boyomichan") {
+  if (engine == "CustomCommand") {
+    // カスタムコマンドを使用した音声合成
+    const command = document.getElementById("CustomCommand").value;
+    if (command) {
+      const replacedCommand = command
+        .replace(/{text}/g, text)
+        .replace(/{rate}/g, TTSspeed)
+        .replace(/{pitch}/g, TTSpitch)
+        .replace(/{volume}/g, TTSvolume);
+      
+      window.electronAPI.send("message", {
+        action: "ExecuteTTSCommand",
+        command: replacedCommand
+      });
+    } else {
+      speak(text, "Default");
+    }
+  } else if (engine == "Boyomichan") {
     if (document.getElementById("BoyomiVoiceSelect").value == "auto") {
       fetch(`http://localhost:${document.getElementById("Boyomi_Port").value}/Talk?text=${text}&speed=${TTSspeed * 100}&volume=${TTSvolume * 100}&tone=${TTSpitch * 100}`)
         .catch(function () {
@@ -1332,3 +1351,214 @@ var intColor = {
     },
   },
 };
+
+// 音声テスト機能
+const TEST_TEXT = "音声テストです。緊急地震速報。強い揺れに警戒してください。";
+
+// デバッグログ関数
+function debugLog(...args) {
+  console.log('[TTS-TEST]', ...args);
+}
+
+debugLog('TTS test module loaded');
+
+// テスト結果を表示する関数
+function showTestResult(engine, status, message) {
+  debugLog(`showTestResult called: engine=${engine}, status=${status}, message=${message}`);
+  const resultDiv = document.getElementById(`TestResult_${engine}`);
+  if (!resultDiv) {
+    debugLog(`Result div not found: TestResult_${engine}`);
+    return;
+  }
+  
+  resultDiv.className = `test-result ${status}`;
+  resultDiv.textContent = message;
+  resultDiv.style.display = 'block';
+  
+  // 成功またはエラーの場合は5秒後に非表示
+  if (status === 'success' || status === 'error') {
+    setTimeout(() => {
+      resultDiv.style.display = 'none';
+    }, 5000);
+  }
+}
+
+// OS標準音声のテスト
+debugLog('Setting up TestTTS_Default button listener');
+const testDefaultButton = document.getElementById("TestTTS_Default");
+debugLog('TestTTS_Default button element:', testDefaultButton);
+
+if (testDefaultButton) {
+  testDefaultButton.addEventListener("click", function() {
+    debugLog('TestTTS_Default button clicked!');
+    const button = this;
+    button.disabled = true;
+    showTestResult('Default', 'testing', '🔄 テスト中...');
+    
+    try {
+    if (!window.speechSynthesis) {
+      showTestResult('Default', 'error', '❌ Web Speech API が利用できません');
+      button.disabled = false;
+      return;
+    }
+    
+    speechSynthesis.cancel();
+    const uttr = new SpeechSynthesisUtterance();
+    uttr.text = TEST_TEXT;
+    uttr.lang = "ja-JP";
+    
+    if (TTSVoiceSelect.value) {
+      const selectedVoice = voices.find(v => v.name === TTSVoiceSelect.value);
+      if (selectedVoice) {
+        uttr.voice = selectedVoice;
+      }
+    }
+    
+    uttr.rate = TTSspeed;
+    uttr.pitch = TTSpitch;
+    uttr.volume = TTSvolume;
+    
+    uttr.onstart = () => {
+      showTestResult('Default', 'testing', '🔊 再生中...');
+    };
+    
+    uttr.onend = () => {
+      showTestResult('Default', 'success', '✅ テスト成功！音声が正常に再生されました');
+      button.disabled = false;
+    };
+    
+    uttr.onerror = (event) => {
+      showTestResult('Default', 'error', `❌ エラー: ${event.error}`);
+      button.disabled = false;
+    };
+    
+    speechSynthesis.speak(uttr);
+    } catch (error) {
+      debugLog('TestTTS_Default error:', error);
+      showTestResult('Default', 'error', `❌ エラー: ${error.message}`);
+      button.disabled = false;
+    }
+  });
+  debugLog('TestTTS_Default listener attached successfully');
+} else {
+  debugLog('ERROR: TestTTS_Default button not found in DOM!');
+}
+
+// 棒読みちゃんのテスト
+debugLog('Setting up TestTTS_Boyomichan button listener');
+const testBoyomiButton = document.getElementById("TestTTS_Boyomichan");
+debugLog('TestTTS_Boyomichan button element:', testBoyomiButton);
+
+if (testBoyomiButton) {
+  testBoyomiButton.addEventListener("click", function() {
+    debugLog('TestTTS_Boyomichan button clicked!');
+    const button = this;
+    button.disabled = true;
+    showTestResult('Boyomichan', 'testing', '🔄 テスト中...');
+    
+    const port = document.getElementById("Boyomi_Port").value;
+  const host = `http://localhost:${port}`;
+  
+  fetch(`${host}/Talk?text=${encodeURIComponent(TEST_TEXT)}&speed=${TTSspeed * 100}&volume=${TTSvolume * 100}&tone=${TTSpitch * 100}`)
+    .then(response => {
+      if (response.ok) {
+        showTestResult('Boyomichan', 'success', '✅ テスト成功！棒読みちゃんに接続できました');
+      } else {
+        showTestResult('Boyomichan', 'error', `❌ エラー: HTTP ${response.status}`);
+      }
+      button.disabled = false;
+    })
+    .catch(error => {
+      debugLog('TestTTS_Boyomichan fetch error:', error);
+      showTestResult('Boyomichan', 'error', `❌ 接続失敗: 棒読みちゃんが起動していないか、ポート番号が間違っています（ポート: ${port}）`);
+      button.disabled = false;
+    });
+  });
+  debugLog('TestTTS_Boyomichan listener attached successfully');
+} else {
+  debugLog('ERROR: TestTTS_Boyomichan button not found in DOM!');
+}
+
+// 外部コマンドのテスト
+debugLog('Setting up TestTTS_CustomCommand button listener');
+const testCustomButton = document.getElementById("TestTTS_CustomCommand");
+debugLog('TestTTS_CustomCommand button element:', testCustomButton);
+
+if (testCustomButton) {
+  testCustomButton.addEventListener("click", function() {
+    debugLog('TestTTS_CustomCommand button clicked!');
+    const button = this;
+    button.disabled = true;
+    showTestResult('CustomCommand', 'testing', '🔄 テスト中...');
+    
+    const command = document.getElementById("CustomCommand").value;
+    debugLog('Command to test:', command);
+  
+  if (!command || command.trim() === '') {
+    showTestResult('CustomCommand', 'error', '❌ コマンドが入力されていません');
+    button.disabled = false;
+    return;
+  }
+  
+  // プレースホルダーを置換
+  const replacedCommand = command
+    .replace(/{text}/g, TEST_TEXT)
+    .replace(/{rate}/g, TTSspeed)
+    .replace(/{pitch}/g, TTSpitch)
+    .replace(/{volume}/g, TTSvolume);
+  
+  // メインプロセスにテストコマンド実行を依頼
+  debugLog('Sending TestTTSCommand to main process:', replacedCommand);
+  debugLog('window.electronAPI:', window.electronAPI);
+  
+  if (!window.electronAPI || !window.electronAPI.send) {
+    debugLog('ERROR: electronAPI.send is not available');
+    showTestResult('CustomCommand', 'error', '❌ エラー: IPC通信が利用できません');
+    button.disabled = false;
+    return;
+  }
+  
+  window.electronAPI.send("message", {
+    action: "TestTTSCommand",
+    command: replacedCommand
+  });
+  debugLog('Message sent to main process');
+  
+  // 結果を待つ（タイムアウト付き）
+  let timeoutId = setTimeout(() => {
+    showTestResult('CustomCommand', 'error', '❌ タイムアウト: コマンドの実行に時間がかかりすぎています');
+    button.disabled = false;
+  }, 10000);
+  
+  // 結果を受信するリスナーを一時的に追加
+  const resultHandler = (_event, response) => {
+    debugLog('Received message from main process:', response);
+    if (response.action === "TestTTSCommandResult") {
+      debugLog('TestTTSCommandResult received:', response);
+      clearTimeout(timeoutId);
+      
+      if (response.success) {
+        showTestResult('CustomCommand', 'success', '✅ テスト成功！コマンドが正常に実行されました');
+      } else {
+        const errorMsg = response.error || '不明なエラー';
+        showTestResult('CustomCommand', 'error', `❌ エラー: ${errorMsg}`);
+      }
+      
+      button.disabled = false;
+      if (window.electronAPI && window.electronAPI.removeListener) {
+        window.electronAPI.removeListener("message2", resultHandler);
+      }
+    }
+  };
+  
+  if (window.electronAPI && window.electronAPI.on) {
+    window.electronAPI.on("message2", resultHandler);
+    debugLog('Result handler registered');
+  } else {
+    debugLog('ERROR: Cannot register result handler - electronAPI.on not available');
+  }
+  });
+  debugLog('TestTTS_CustomCommand listener attached successfully');
+} else {
+  debugLog('ERROR: TestTTS_CustomCommand button not found in DOM!');
+}

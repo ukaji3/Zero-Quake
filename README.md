@@ -3,6 +3,29 @@
 ![](https://img.shields.io/github/downloads/0quake/Zero-Quake/total)
 ![](https://img.shields.io/github/v/release/0Quake/Zero-Quake)
 ![](https://img.shields.io/github/license/0quake/Zero-Quake)
+![](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue)
+
+## 対応プラットフォーム
+
+- **Windows** 10/11 (x64)
+- **Linux** Ubuntu 20.04 LTS 以降 (GNOME デスクトップ環境)
+
+### Linux (Ubuntu) インストール
+
+**クイックスタート**: [QUICKSTART_UBUNTU.md](QUICKSTART_UBUNTU.md) - 最速インストール方法
+
+**詳細ガイド**: [LINUX_INSTALL.md](LINUX_INSTALL.md) - 完全なインストール・設定ガイド
+
+**音声合成設定**: [LINUX_TTS_GUIDE.md](LINUX_TTS_GUIDE.md) - Linux での音声通知設定
+
+```bash
+# 簡単インストール（推奨）
+cd dist
+../install-ubuntu.sh
+
+# または手動インストール
+sudo apt install ./dist/zeroquake_0.9.5_amd64.deb
+```
 
 ## ご注意
 

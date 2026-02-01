@@ -156,6 +156,31 @@
           }).catch(fire_default);
         }
 
+      } else if (engine == "CustomCommand") {
+        // カスタムコマンドを使用した音声合成（Linux等）
+        try {
+          if (config.notice.voice_parameter.CustomCommand) {
+            // プレースホルダーを置換
+            let command = config.notice.voice_parameter.CustomCommand
+              .replace(/{text}/g, text)
+              .replace(/{rate}/g, Rate)
+              .replace(/{pitch}/g, Pitch)
+              .replace(/{volume}/g, Volume);
+            
+            // メインプロセスにコマンド実行を依頼
+            window.electronAPI.send("message", {
+              action: "ExecuteTTSCommand",
+              command: command
+            });
+          } else {
+            // コマンドが設定されていない場合はデフォルトにフォールバック
+            speak(text, "Default");
+          }
+        } catch (error) {
+          console.error("CustomCommand TTS error:", error);
+          // エラー時はデフォルトエンジンにフォールバック
+          speak(text, "Default");
+        }
       } else if (engine == "Default") {
         speechSynthesis.cancel();
         // 発言を作成

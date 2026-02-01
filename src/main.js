@@ -3,6 +3,39 @@ process.env.TZ = "Asia/Tokyo";
 // eslint-disable-next-line no-undef
 process.title = 'Zero Quake';
 
+// Linux/Wayland でのトレイアイコン対応
+// Electron 39 + GNOME Shell 46 + Wayland の互換性問題への対処
+if (process.platform === 'linux') {
+  // GTK スケールファクターエラーを抑制
+  process.env.GDK_SCALE = process.env.GDK_SCALE || '1';
+  process.env.GDK_DPI_SCALE = process.env.GDK_DPI_SCALE || '1';
+  
+  // Wayland での Electron の動作を改善
+  process.env.ELECTRON_OZONE_PLATFORM_HINT = 'auto';
+  
+  // NSS 証明書エラーを抑制（オプション）
+  process.env.NSS_SDB_USE_CACHE = 'no';
+  
+  // AppIndicator プロトコルの問題を回避するため、
+  // StatusNotifierItem の代わりに従来の XEmbed トレイを試みる
+  // ただし、これは GNOME Shell 拡張機能に依存する
+  if (process.env.XDG_SESSION_TYPE === 'wayland') {
+    // Wayland セッションでは XWayland を使用
+    process.env.GDK_BACKEND = 'x11';
+  }
+}
+
+// デバッグモード設定
+const DEBUG_MODE = process.argv.includes('-v') || process.argv.includes('--debug') || process.argv.includes('--verbose');
+if (DEBUG_MODE) {
+  console.log('[DEBUG] Debug mode enabled');
+  console.log('[DEBUG] Command line arguments:', process.argv);
+  console.log('[DEBUG] Platform:', process.platform);
+  console.log('[DEBUG] Session type:', process.env.XDG_SESSION_TYPE);
+  console.log('[DEBUG] Current desktop:', process.env.XDG_CURRENT_DESKTOP);
+  console.log('[DEBUG] Ozone platform:', process.env.ELECTRON_OZONE_PLATFORM_HINT);
+}
+
 //リプレイ
 var Replay = 0;
 var MainWindow, SettingWindow, TsunamiWindow, WorkerWindow;
@@ -128,6 +161,7 @@ var defaultConfigVal = {
       engine: "Default",
       Boyomi_Port: 50080,
       Boyomi_Voice: "auto",
+      CustomCommand: "espeak-ng -v ja '{text}'", // Linux用カスタムコマンド
     },
     voice: {
       EEW: "{training2}緊急地震速報です。{region_name}で最大の震度、{maxInt}の地震が発生しました。[{location}の予想震度は{local_Int}です。]",
@@ -488,44 +522,166 @@ function errorResolve(response) {
 //アプリのロード完了イベント
 electron.app.on("ready", () => {
   //タスクトレイアイコン
-  tray = new electron.Tray(
-    // eslint-disable-next-line no-undef
-    `${__dirname}/img/icon.${process.platform === "win32" ? "ico" : "png"}`
-  );
-  tray.setToolTip("Zero Quake");
-  tray.setContextMenu(
-    electron.Menu.buildFromTemplate([
-      {
-        label: "メイン画面の表示",
-        click: () => {
-          CreateMainWindow();
-        },
+  const iconPath = `${__dirname}/img/icon.${process.platform === "win32" ? "ico" : "png"}`;
+  if (DEBUG_MODE) {
+    console.log('[DEBUG] Tray: Creating tray icon');
+    console.log('[DEBUG] Tray: Icon path:', iconPath);
+    console.log('[DEBUG] Tray: Platform:', process.platform);
+  }
+  
+  try {
+    tray = new electron.Tray(iconPath);
+    
+    if (DEBUG_MODE) {
+      console.log('[DEBUG] Tray: Tray object created');
+    }
+    
+    tray.setToolTip("Zero Quake");
+    
+    if (DEBUG_MODE) {
+      console.log('[DEBUG] Tray: Tooltip set');
+    }
+    
+    // Linux でのタイトル設定（一部の環境で必要）
+    if (process.platform === 'linux') {
+      try {
+        tray.setTitle("Zero Quake");
+        if (DEBUG_MODE) {
+          console.log('[DEBUG] Tray: Title set');
+        }
+      } catch (titleError) {
+        if (DEBUG_MODE) {
+          console.log('[DEBUG] Tray: setTitle failed (not critical):', titleError.message);
+        }
+      }
+    }
+    
+    if (DEBUG_MODE) {
+      console.log('[DEBUG] Tray: Icon created successfully');
+      console.log('[DEBUG] Tray: isDestroyed:', tray.isDestroyed());
+    }
+    
+    // StatusNotifierItem 登録エラーは無視して続行
+    // （エラーが出てもトレイアイコンは表示される場合がある）
+    
+  } catch (error) {
+    console.error('[ERROR] Failed to create tray icon:', error);
+    console.error('[ERROR] Error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    
+    if (DEBUG_MODE) {
+      console.log('[DEBUG] Tray creation failed, app will continue without tray icon');
+      console.log('[DEBUG] This is a known issue with Electron 39 + GNOME Shell 46 + Wayland');
+      console.log('[DEBUG] Workaround: Use X11 session instead of Wayland');
+    }
+    
+    // トレイアイコンなしで続行
+    console.log('[INFO] Starting without system tray icon');
+    CreateMainWindow();
+    return;
+  }
+  
+  // コンテキストメニューの作成
+  const contextMenu = electron.Menu.buildFromTemplate([
+    {
+      label: "メイン画面の表示",
+      click: () => {
+        if (DEBUG_MODE) console.log('[DEBUG] Tray: メイン画面の表示 clicked');
+        CreateMainWindow();
       },
-      {
-        label: "設定",
-        click: () => {
-          Create_SettingWindow();
-        },
+    },
+    {
+      label: "設定",
+      click: () => {
+        if (DEBUG_MODE) console.log('[DEBUG] Tray: 設定 clicked');
+        Create_SettingWindow();
       },
-      { type: "separator" },
-      {
-        label: "再起動",
-        click: () => {
-          app.relaunch();
-          app.exit(0);
-        },
+    },
+    { type: "separator" },
+    {
+      label: "再起動",
+      click: () => {
+        if (DEBUG_MODE) console.log('[DEBUG] Tray: 再起動 clicked');
+        app.relaunch();
+        app.exit(0);
       },
-      {
-        label: "終了",
-        click: () => {
-          app.exit(0);
-        },
+    },
+    {
+      label: "終了",
+      click: () => {
+        if (DEBUG_MODE) console.log('[DEBUG] Tray: 終了 clicked');
+        app.exit(0);
       },
-    ])
-  );
+    },
+  ]);
+  
+  tray.setContextMenu(contextMenu);
+  
+  if (DEBUG_MODE) {
+    console.log('[DEBUG] Tray: Context menu set');
+  }
+  
+  // すべてのイベントをデバッグ
+  if (DEBUG_MODE) {
+    console.log('[DEBUG] Tray: Registering all possible events for debugging');
+    
+    // すべての可能なイベントをリスン
+    const events = ['click', 'right-click', 'double-click', 'balloon-show', 'balloon-click', 'balloon-closed', 'drop', 'drop-files', 'drop-text', 'drag-enter', 'drag-leave', 'drag-end', 'mouse-enter', 'mouse-leave', 'mouse-move'];
+    
+    events.forEach(eventName => {
+      tray.on(eventName, function(...args) {
+        console.log(`[DEBUG] Tray: ${eventName} event fired!`, args);
+      });
+    });
+  }
+  
+  // Linux用: 左クリックと右クリックの両方でメニューを表示
+  if (process.platform === 'linux') {
+    if (DEBUG_MODE) {
+      console.log('[DEBUG] Tray: Setting up Linux-specific click handlers');
+    }
+    
+    // 左クリック
+    tray.on('click', function (event, bounds) {
+      if (DEBUG_MODE) {
+        console.log('[DEBUG] Tray: click event (Linux)');
+        console.log('[DEBUG] Tray: Event:', event);
+        console.log('[DEBUG] Tray: Bounds:', bounds);
+      }
+      tray.popUpContextMenu(contextMenu);
+    });
+    
+    // 右クリック
+    tray.on('right-click', function (event, bounds) {
+      if (DEBUG_MODE) {
+        console.log('[DEBUG] Tray: right-click event (Linux)');
+        console.log('[DEBUG] Tray: Event:', event);
+        console.log('[DEBUG] Tray: Bounds:', bounds);
+      }
+      tray.popUpContextMenu(contextMenu);
+    });
+    
+    // マウスエンター（ホバー）でもメニューを表示する試み
+    tray.on('mouse-enter', function (event, bounds) {
+      if (DEBUG_MODE) {
+        console.log('[DEBUG] Tray: mouse-enter event (Linux)');
+      }
+    });
+  }
+  
+  // ダブルクリックでメイン画面を表示
   tray.on("double-click", function () {
+    if (DEBUG_MODE) console.log('[DEBUG] Tray: double-click event');
     CreateMainWindow();
   });
+  
+  if (DEBUG_MODE) {
+    console.log('[DEBUG] Tray: All event handlers registered');
+    console.log('[DEBUG] Tray: Waiting for events...');
+  }
 
   electron.powerMonitor.on("resume", () => {
     UpdateEQInfo();
@@ -647,6 +803,57 @@ ipcMain.on("message", (_event, response) => {
     case "Request_wepa":
       Req_JMA_wepa();
       break;
+    case "ExecuteTTSCommand":
+      // カスタムコマンドによる音声合成実行（Linux等）
+      if (response.command) {
+        exec(response.command, (error, stdout, stderr) => {
+          if (error) {
+            console.error(`TTS Command Error: ${error.message}`);
+            return;
+          }
+          if (stderr) {
+            console.error(`TTS Command stderr: ${stderr}`);
+          }
+        });
+      }
+      break;
+    case "TestTTSCommand":
+      // カスタムコマンドのテスト実行（結果を返す）
+      if (DEBUG_MODE) {
+        console.log('[DEBUG] TestTTSCommand received');
+        console.log('[DEBUG] Command:', response.command);
+      }
+      if (response.command) {
+        exec(response.command, { timeout: 10000 }, (error, stdout, stderr) => {
+          if (DEBUG_MODE) {
+            console.log('[DEBUG] Command execution completed');
+            console.log('[DEBUG] Error:', error);
+            console.log('[DEBUG] Stdout:', stdout);
+            console.log('[DEBUG] Stderr:', stderr);
+          }
+          if (SettingWindow) {
+            SettingWindow.webContents.send("message2", {
+              action: "TestTTSCommandResult",
+              success: !error,
+              error: error ? error.message : null,
+              stdout: stdout,
+              stderr: stderr
+            });
+            if (DEBUG_MODE) {
+              console.log('[DEBUG] Result sent to SettingWindow');
+            }
+          } else {
+            if (DEBUG_MODE) {
+              console.log('[DEBUG] SettingWindow is null, cannot send result');
+            }
+          }
+        });
+      } else {
+        if (DEBUG_MODE) {
+          console.log('[DEBUG] No command provided in TestTTSCommand');
+        }
+      }
+      break;
     case "Request_usgs":
       Req_USGS();
       break;
@@ -658,9 +865,48 @@ ipcMain.on("message", (_event, response) => {
 
 function setOpenAtLogin(openAtLogin) {
   // eslint-disable-next-line no-undef
-  if (process.platform != "win32") {
-    app.setLoginItemSettings({ openAtLogin: openAtLogin });
-  } else {
+  if (process.platform === "linux") {
+    // Linux (GNOME) の自動起動設定
+    app.setLoginItemSettings({
+      openAtLogin: openAtLogin,
+      openAsHidden: false,
+      args: []
+    });
+    
+    // GNOME の autostart ディレクトリに .desktop ファイルを作成/削除
+    const homePath = app.getPath("home");
+    const autostartDir = path.join(homePath, ".config", "autostart");
+    const desktopFile = path.join(autostartDir, "zeroquake.desktop");
+    
+    if (openAtLogin) {
+      // autostart ディレクトリが存在しない場合は作成
+      if (!fs.existsSync(autostartDir)) {
+        fs.mkdirSync(autostartDir, { recursive: true });
+      }
+      
+      const appPath = app.getPath("exe");
+      const desktopEntry = `[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Zero Quake
+Comment=地震・津波情報表示アプリケーション
+Exec=${appPath}
+Icon=zeroquake
+Terminal=false
+Categories=Utility;Network;
+StartupNotify=true
+X-GNOME-Autostart-enabled=true
+`;
+      
+      fs.writeFileSync(desktopFile, desktopEntry, "utf8");
+    } else {
+      // 自動起動を無効化
+      if (fs.existsSync(desktopFile)) {
+        fs.unlinkSync(desktopFile);
+      }
+    }
+  } else if (process.platform === "win32") {
+    // Windows の自動起動設定
     app.setLoginItemSettings({ openAtLogin: false });
 
     const homePath = String(app.getPath("home")).replace("\\\\", "/");
@@ -680,6 +926,9 @@ function setOpenAtLogin(openAtLogin) {
           return;
         });
     }
+  } else {
+    // macOS などその他のプラットフォーム
+    app.setLoginItemSettings({ openAtLogin: openAtLogin });
   }
 }
 
@@ -916,13 +1165,25 @@ function Create_SettingWindow(update) {
       }
 
       const homePath = String(app.getPath("home")).replace("\\\\", "/");
+      
+      // プラットフォームごとの自動起動状態チェック
+      let isAutoStartEnabled = app.getLoginItemSettings().openAtLogin;
+      if (process.platform === "win32") {
+        // Windows の場合は追加でスタートアップフォルダもチェック
+        isAutoStartEnabled = isAutoStartEnabled 
+          || fs.existsSync(`${homePath}/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/ZeroQuake.lnk`);
+      } else if (process.platform === "linux") {
+        // Linux (GNOME) の場合は autostart ディレクトリもチェック
+        const autostartFile = path.join(homePath, ".config", "autostart", "zeroquake.desktop");
+        isAutoStartEnabled = isAutoStartEnabled || fs.existsSync(autostartFile);
+      }
+      
       SettingWindow.webContents.send("message2", {
         action: "initialData",
         config: config,
         defaultConfigVal: defaultConfigVal,
         softVersion: soft_version,
-        openAtLogin: app.getLoginItemSettings().openAtLogin
-          || fs.existsSync(`${homePath}/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/ZeroQuake.lnk`),
+        openAtLogin: isAutoStartEnabled,
         updatePanelMode: update,
       });
       if (update_data) {
@@ -4410,10 +4671,17 @@ function PlayAudio(name) {
 //メインウィンドウ内通知
 var notifyData;
 function SystemNotification(message) {
+  // プラットフォームに応じたアイコンパスを選択
+  const iconPath = process.platform === "win32" 
+    ? path.join(__dirname, "img/icon.ico")
+    : path.join(__dirname, "img/icon.png");
+    
   var Push = new Notification({
     title: "Zero Quake システム通知",
     body: message,
-    icon: path.join(__dirname, "img/icon.ico"),
+    icon: iconPath,
+    urgency: "normal", // Linux (GNOME) での通知の優先度
+    timeoutType: "default" // Linux での通知タイムアウト設定
   });
 
   Push.show();

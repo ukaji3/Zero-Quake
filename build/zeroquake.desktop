@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Zero Quake
+Name[ja]=Zero Quake
+Comment=Earthquake and Tsunami Information Display Application
+Comment[ja]=地震・津波情報表示アプリケーション
+GenericName=Earthquake Information
+GenericName[ja]=地震情報
+Exec=zeroquake %U
+Icon=zeroquake
+Terminal=false
+Categories=Utility;Network;
+Keywords=earthquake;tsunami;disaster;防災;地震;津波;緊急地震速報;
+StartupNotify=true
+StartupWMClass=Zero Quake
+MimeType=
+Actions=
+
+[Desktop Action Settings]
+Name=Settings
+Name[ja]=設定
+Exec=zeroquake --settings

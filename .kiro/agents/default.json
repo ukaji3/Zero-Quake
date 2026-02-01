@@ -1,0 +1,10 @@
+{
+  "description": "Default agent with Serena MCP for code analysis",
+  "allowedTools": ["*"],
+  "mcpServers": {
+    "serena": {
+      "command": "serena",
+      "args": []
+    }
+  }
+}

@@ -4,7 +4,10 @@
   "version": "0.9.5",
   "description": "Zero Quake",
   "scripts": {
-    "start": "electron . --develop --debug-mode"
+    "start": "electron . --develop --debug-mode",
+    "build:linux": "electron-builder --linux",
+    "build:win": "electron-builder --win",
+    "build:all": "electron-builder --linux --win"
   },
   "build": {
     "productName": "Zero Quake",
@@ -44,6 +47,42 @@
         "JA-JP"
       ],
       "backgroundColor": "#202227"
+    },
+    "linux": {
+      "icon": "src/img/icon.png",
+      "category": "Utility",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "desktop": {
+        "entry": {
+          "Name": "Zero Quake",
+          "Comment": "地震・津波情報表示アプリケーション",
+          "GenericName": "Earthquake Information",
+          "Keywords": "earthquake;tsunami;disaster;防災;地震;津波",
+          "StartupWMClass": "Zero Quake",
+          "Terminal": "false",
+          "Type": "Application",
+          "Categories": "Utility;Network;"
+        }
+      },
+      "maintainer": "benidate",
+      "vendor": "benidate",
+      "synopsis": "地震・津波情報をリアルタイムで表示",
+      "description": "緊急地震速報、地震情報、津波情報などをリアルタイムで受信・表示するアプリケーション",
+      "executableName": "zeroquake"
+    },
+    "deb": {
+      "depends": [
+        "libnotify4",
+        "libxtst6",
+        "libnss3",
+        "libatspi2.0-0",
+        "libdrm2",
+        "libgbm1",
+        "libxcb-dri3-0"
+      ]
     }
   },
   "type": "module",
