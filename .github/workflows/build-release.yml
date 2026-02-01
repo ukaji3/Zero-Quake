@@ -21,7 +21,9 @@ jobs:
         run: npm ci
         
       - name: Build Linux packages
-        run: npm run build:linux
+        run: npm run build:linux -- --publish never
+        env:
+          ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES: true
         
       - name: Create Release
         uses: softprops/action-gh-release@v2
