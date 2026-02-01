@@ -87,3 +87,9 @@ src/electron-builder.env
 kiromon.log
 .kiro/
 
+# Serena
+.serena/
+
+# VSCode
+.vscode/
+
