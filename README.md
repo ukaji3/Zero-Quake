@@ -1,9 +1,20 @@
-# Zero-Quake
+# Zero-Quake (Ubuntu Build)
+
+> このリポジトリは、[0Quake/Zero-Quake](https://github.com/0Quake/Zero-Quake) のUbuntu用ビルドを提供するプロジェクトです。
 
 ![](https://img.shields.io/github/downloads/0quake/Zero-Quake/total)
 ![](https://img.shields.io/github/v/release/0Quake/Zero-Quake)
 ![](https://img.shields.io/github/license/0quake/Zero-Quake)
 ![](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue)
+
+## このリポジトリについて
+
+このリポジトリは、オリジナルの [Zero-Quake](https://github.com/0Quake/Zero-Quake) プロジェクトをUbuntu/Linux環境向けにビルドし、debパッケージとして配布するためのものです。
+
+**オリジナルプロジェクト**: [0Quake/Zero-Quake](https://github.com/0Quake/Zero-Quake)  
+**開発者**: benidate 様
+
+オリジナルプロジェクトの素晴らしい開発に感謝いたします。
 
 ## 対応プラットフォーム
 
