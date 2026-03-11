@@ -106,6 +106,10 @@
                         <span class="material-icons-round" aria-hidden="true">tsunami</span>
                         津波情報
                     </div>
+                    <div id="tab1_menu18" class="tabmenu" tabindex="-1" ZQ-focusgroup-item role="tab" aria-controls="tab1_content18">
+                        <span class="material-icons-round" aria-hidden="true">bar_chart</span>
+                        潮位観測情報
+                    </div>
                     <div id="tab1_menu7" class="tabmenu" tabindex="-1" ZQ-focusgroup-item role="tab" aria-controls="tab1_content7">
                         <span class="material-icons-round" aria-hidden="true">update</span>
                         リアルタイム揺れ情報
@@ -558,6 +562,11 @@
 
                 <hr>
 
+
+
+
+
+
                 <h2 id="ご注意">ご注意</h2>
                 <ul>
                     <li>地震に関する正確な知識に基づき、正しくお使いください。</li>
@@ -641,6 +650,16 @@
                         </details>
                     </li>
                     <li>
+                        <h3 id="潮汐">潮汐</h3>
+                        <p>潮位観測情報</p>
+                        <details>
+                            <summary>出典・情報源</summary>
+                            <ul>
+                                <li>出典：<a href="https://www.jma.go.jp/bosai/map.html?contents=tidelevel">気象庁ホームページ「潮位観測情報」</a></li>
+                            </ul>
+                        </details>
+                    </li>
+                    <li>
                         <h3 id="海外の地震情報">海外の地震情報</h3>
                         <ol>
                             <li>USGS Earthquake Catalog</li>
@@ -715,7 +734,6 @@
                         </ol>
                     </li>
                 </ul>
-
             </div>
             <div id="tab1_content4" class="tabcontent" role="tabpanel" aria-labelledby="tab1_menu4">
                 <h3><span>情報種別ごとの設定</span>緊急地震速報</h3>
@@ -753,7 +771,9 @@
                         </select>
                     </label>
 
-                    <label><input type="checkbox" id="EEW_IntQ">予想最大震度 不明時も通知</label>
+                    <label><input type="checkbox" id="EEW_IntI">予想最大震度 上昇時のみ更新報を通知</label>
+                    <label><input type="checkbox" id="EEW_IntQ">予想最大震度 不明時は常に通知</label>
+                    <div class="smalltext">予想最大震度 不明の状態で予想最大震度を含む更新報を受信した場合も「上昇」と扱います。</div>
 
                     <h5>現在地の予想震度</h5>
                     <label>しきい値
@@ -773,9 +793,11 @@
                     </label>
 
                     <label><input type="checkbox" id="EEW_userIntQ">予想震度 不明時も通知</label>
+                    <div class="smalltext">現在地の揺れが小さい（概ね震度4未満）と評価される場合、予想震度は発表されないため「不明」として扱います。</div>
+
                 </section>
 
-                <h4>画面通知</h4>
+                <h4>通知内容</h4>
                 <section>
                     <label>
                         緊急地震速報（初報）：
@@ -1754,6 +1776,19 @@
                     <label><input type="checkbox" id="TREM-RTS_GetData">データを取得</label>
                     <label> 情報取得間隔（秒）<input id="TREM-RTS_Interval" type="number" min="1" max="30" value="1" step="1" placeholder="情報を取得する間隔（秒）"></label>
                     <span class="smalltext">台湾を中心に運営されるコミュニティ観測網によるリアルタイム震度を取得します。政府機関等運営の物よりも精度は劣ります。本ソースから得られるデータは台湾の震度指標によりますが、おおむね日本のものと一致するため、同様に表示しています。</span>
+                </section>
+            </div>
+            <div id="tab1_content18" class="tabcontent" role="tabpanel" aria-labelledby="tab1_menu18">
+                <h3><span>情報種別ごとの設定</span>潮位観測情報</h3>
+                <h4>全般</h4>
+                <section>
+                    <label>潮位集計方法
+                        <select id="tide_processing">
+                            <option value="median" selected>4回中央値</option>
+                            <option value="latest">最新値</option>
+                        </select>
+                    </label>
+                    <span class="smalltext">全般>現在地に設定した場所から近い順に10か所の潮位を取得します。取得した潮位について、最新の値を表示するか、4サンプル(1分間相当)の中央値を表示するかを選択できます。</span>
                 </section>
             </div>
 

@@ -136,6 +136,9 @@ var defaultConfigVal = {
       Local_threshold: -1,
       Bypass_threshold: true,
     },
+    TideHeight: {
+      processing: "median",
+    },
     RealTimeShake: {
       DetectEarthquake: false,
       noticeLv: 2,
@@ -205,6 +208,7 @@ var defaultConfigVal = {
       TsunamiWarningColor: "rgb(255, 40, 0)",
       TsunamiWatchColor: "rgb(250, 245, 0)",
       TsunamiYohoColor: "rgb(66, 158, 255)",
+      AstroHeightColor: "rgb(66, 158, 255)",
     },
   },
   data: { layer: "", overlay: [], kmoni_points_show: true },
@@ -799,6 +803,9 @@ ipcMain.on("message", (_event, response) => {
       break;
     case "Request_gaikyo":
       Req_JMA_gaikyo();
+      break;
+    case "Request_tide":
+      Req_JMATide();
       break;
     case "Request_wepa":
       Req_JMA_wepa();
@@ -1564,6 +1571,7 @@ function start() {
 
   //一回限り
   Req_TremRts_sta();
+  Req_JMATide_sta();
 }
 
 function Req_JMA_gaikyo() {
@@ -1760,6 +1768,163 @@ function Req_TremRts() {
 
   setTimeout(Req_TremRts, config.Source.TREMRTS.Interval);
 }
+
+function sort_by_dist_TIDE(data) {
+  return data.sort(function (a, b) {
+    var a_dist = geosailing(a.lat, a.lon, config.home.latitude, config.home.longitude)
+    var b_dist = geosailing(b.lat, b.lon, config.home.latitude, config.home.longitude)
+    return a_dist - b_dist
+  })
+}
+
+var JMATide_sta = [];
+function Req_JMATide_sta() {
+  if (net.online) {
+    var request = net.request("https://www.jma.go.jp/bosai/tidelevel/const/tide_area.json?_=" + Number(new Date()));
+    request.on("response", (res) => {
+      var dataTmp = "";
+      res.on("data", (chunk) => {
+        dataTmp += chunk;
+      });
+      res.on("end", function () {
+        try {
+          var json = ParseJSON(dataTmp);
+          var stations = []
+          Object.keys(json).forEach(function (key) {
+            var el = json[key]
+            el.class30s.forEach(function (cl) {
+              if (cl.stations) {
+                cl.stations.forEach(function (st) {
+                  if (st.code && st.lat && st.lon && st.name) {//データ有効性チェック
+                    st.threshold_warn = cl.standard.warning
+                    st.threshold_advisory = cl.standard.advisory
+                    stations.push(st);
+                  }
+                });
+              }
+            });
+          });
+
+          //↓近い順10件
+          stations = sort_by_dist_TIDE(stations);
+          JMATide_sta = stations.slice(0, 10)
+          //↑近い順10件
+        } catch (e) {
+          messageToMainWindow({ action: "Return_tide", data: [] });
+        }
+      });
+    });
+    request.on("error", () => {
+      messageToMainWindow({ action: "Return_tide", data: [] });
+    });
+    request.end();
+  } else {
+    messageToMainWindow({ action: "Return_tide", data: [] });
+  }
+}
+
+var JMATide_astro = {};
+var JMATide_obs = {};
+function Req_JMATide() {
+  if (!JMATide_sta) Req_TremRts_sta();
+
+  if (net.online) {
+    JMATide_sta.forEach(function (st) {
+
+      if (!JMATide_astro[st.code]) {
+        var request = net.request(`https://www.jma.go.jp/bosai/tidelevel/const/tide_astro/tide_astro_${NormalizeDate("YYYY", new Date() - Replay)}_${st.code}.json`);
+        request.on("response", (res) => {
+          var dataTmp = "";
+          res.on("data", (chunk) => {
+            dataTmp += chunk;
+          });
+          res.on("end", function () {
+            try {
+              var json = ParseJSON(dataTmp);
+              if (json.tide) {
+                var tide = json.tide;
+                JMATide_astro[st.code] = tide
+
+                if (JMATide_obs[st.code]) {//★1と同じ
+                  JMATide_obs[st.code].astro = tide[NormalizeDate("MMDD", new Date() - Replay)][NormalizeDate("h", new Date() - Replay)]
+                  messageToMainWindow({ action: "Return_tide", data: sort_by_dist_TIDE(Object.values(JMATide_obs)) });
+                }
+              }
+
+            } catch (e) {
+              messageToMainWindow({ action: "Return_tide", data: [] });
+            }
+          });
+        });
+        request.on("error", () => {
+          messageToMainWindow({ action: "Return_tide", data: [] });
+        });
+        request.end();
+      }
+
+
+      var request = net.request(`https://www.jma.go.jp/bosai/tidelevel/data/tide/tide_obs_${NormalizeDate(2, new Date() - Replay)}_${st.code}.json`);
+      request.on("response", (res) => {
+        var dataTmp = "";
+        res.on("data", (chunk) => {
+          dataTmp += chunk;
+        });
+        res.on("end", function () {
+          try {
+            var json = ParseJSON(dataTmp);
+            if (json.tide && json.tide.length >= 4) {
+              var obsdata = {
+                code: st.code,
+                name: st.name,
+                by: st.typeName ? st.typeName : "-",
+                date: new Date(json.time) + (json.interval * json.tide.length) * 1000,
+                threshold_warn: st.threshold_warn,
+                threshold_advisory: st.threshold_advisory
+              };
+
+              var part = json.tide.slice(-4);
+              var height;
+              switch (config.Info.TideHeight.processing) {
+                case "median":
+                  var sorted = part.sort((a, b) => a - b);
+                  height = (sorted[1] + sorted[2]) / 2
+                  break;
+                default:
+                case "latest":
+                  height = json.tide[json.tide.length - 1]
+                  break;
+              }
+              obsdata.height = height;
+
+              if (JMATide_astro[st.code]) {//★1と同じ処理
+                /*線形補完する？
+function lerp(x0, y0, x1, y1, x) {//線形補完
+  return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+}
+var h = Number(NormalizeDate("h", new Date() - Replay))
+var m = Number(NormalizeDate("m", new Date() - Replay))
+lerp(h, tide[h], h + 1, tide[h + 1], h + m / 60)*/
+                obsdata.astro = JMATide_astro[st.code][NormalizeDate("MMDD", new Date() - Replay)][NormalizeDate("h", new Date() - Replay)]
+              }
+
+              JMATide_obs[st.code] = obsdata
+              messageToMainWindow({ action: "Return_tide", data: sort_by_dist_TIDE(Object.values(JMATide_obs)) });
+            }
+          } catch (e) {
+            messageToMainWindow({ action: "Return_tide", data: [] });
+          }
+        });
+      });
+      request.on("error", () => {
+        messageToMainWindow({ action: "Return_tide", data: [] });
+      });
+      request.end();
+    })
+  } else {
+    messageToMainWindow({ action: "Return_tide", data: [] });
+  }
+}
+
 
 function Req_EarlyEst() {
   if (config.Source.EarlyEst.GetData) {
@@ -2747,9 +2912,13 @@ function MargeEEW(data) {
       return elm.EQ_id == data.EventID;
     });
 
-    //５分以上前の地震／未来の地震（リプレイ時）を除外
+    var showing = Boolean(EEW_nowList.find(function (elm) {
+      return elm.EventID == data.EventID;
+    }));
+
+    //５分以上前の地震／未来の地震（リプレイ時）を除外 ただし既に表示中の地震の更新報は通す
     var pastTime = new Date() - Replay - data.origin_time;
-    if (!EQJSON && (pastTime > 300000 || pastTime < 0)) return;
+    if (!showing && (pastTime > 300000 || pastTime < 0)) return;
 
     data.TimeTable = TimeTable_JMA2001[depthFilter(data.depth)];
     if (data.source == "simulation") {
@@ -2765,7 +2934,7 @@ function MargeEEW(data) {
     if (data.source == "simulation" && !data.isPlum) {
       var estIntTmp = {};
       if (!data.is_cancel) {
-        if (!data.userIntensity)
+        if (!data.userIntensity && data.depth <= 150)
           data.userIntensity = calcInt(
             data.magnitude,
             data.depth,
@@ -3038,9 +3207,14 @@ function EEW_Alert(data, update) {
     });
     var first = !old || !old.shown
 
+
+    var old_i = old ? NormalizeShindo(old.maxInt, 5) : -9;
+    var new_i = NormalizeShindo(data.maxInt, 5);
+    var int_increased = new_i > old_i || !new_i || !old_i
+
     var notified = false;
 
-    if (!update && show_alert) {
+    if (!update && show_alert && !(!int_increased && config.Info.EEW.IntTerm1)) {
       //同一報の更新時でなく、条件に合致
       notified = true
       PlayAudio(data.alertflg == "警報" ? "EEW1" : "EEW2");
