@@ -83,7 +83,7 @@ var FERegion = JSON.parse(
   await readFile(path.join(__dirname, "./Resource/feRegion.json"))
 );
 var packageJson = JSON.parse(await readFile(path.join(__dirname, "../package.json")));
-var soft_version;
+var soft_version = packageJson.version;
 var EQInfoFetchCount = 0;
 
 // prettier-ignore
@@ -180,28 +180,27 @@ var defaultConfigVal = {
     window: { EEW: "openWindow", EEW_Update: "push" },
   },
   color: {
-    IntColorTheme: "0quake_old",
+    "IntColorTheme": "0quake",
     psWave: { PwaveColor: "rgb(48, 148, 255)", SwaveColor: "rgb(255, 62, 48)" },
-    Shindo: {
-      "0": { background: "rgb(80, 86, 102)", color: "rgb(204, 204, 204)" },
-      "1": { background: "rgb(134, 168, 198)", color: "rgb(51, 51, 51)" },
-      "2": { background: "rgb(56, 120, 193)", color: "rgb(255, 255, 255)" },
-      "3": { background: "rgb(80, 186, 84)", color: "rgb(34, 34, 34)" },
-      "4": { background: "rgb(204, 209, 74)", color: "rgb(34, 34, 34)" },
-      "5m": { background: "rgb(231, 150, 21)", color: "rgb(0, 0, 0)" },
-      "5p": { background: "rgb(255, 91, 22)", color: "rgb(0, 0, 0)" },
-      "6m": { background: "rgb(237, 0, 0)", color: "rgb(255, 255, 255)" },
-      "6p": { background: "rgb(128, 9, 9)", color: "rgb(255, 255, 255)" },
-      "7": { background: "rgb(196, 0, 222)", color: "rgb(255, 255, 255)" },
-      "?": { background: "rgb(191, 191, 191)", color: "rgb(68, 68, 68)" },
-      "5p?": { background: "rgb(231, 150, 21)", color: "rgb(0, 0, 0)" },
-    },
-    LgInt: {
-      "1": { background: "rgb(80, 186, 84)", color: "rgb(34, 34, 34)" },
-      "2": { background: "rgb(231, 150, 21)", color: "rgb(0, 0, 0)" },
-      "3": { background: "rgb(237, 0, 0)", color: "rgb(255, 255, 255)" },
-      "4": { background: "rgb(196, 0, 222)", color: "rgb(255, 255, 255)" },
-      "?": { background: "rgb(191, 191, 191)", color: "rgb(68, 68, 68)" },
+    "Shindo": {
+      "0": { "background": "rgb(80, 81, 83)", "color": "rgb(194, 195, 197)" },
+      "1": { "background": "rgb(157, 175, 194)", "color": "rgb(61, 64, 89)" },
+      "2": { "background": "rgb(89, 123, 171)", "color": "rgb(0, 1, 6)" },
+      "3": { "background": "rgb(69, 72, 130)", "color": "rgb(216, 217, 235)" },
+      "4": { "background": "rgb(217, 215, 98)", "color": "rgb(67, 67, 71)" },
+      "7": { "background": "rgb(165, 0, 194)", "color": "rgb(255, 255, 255)" },
+      "5m": { "background": "rgb(224, 157, 0)", "color": "rgb(38, 38, 38)" },
+      "5p": { "background": "rgb(232, 93, 19)", "color": "rgb(0, 0, 0)" },
+      "6m": { "background": "rgb(194, 26, 0)", "color": "rgb(255, 255, 255)" },
+      "6p": { "background": "rgb(128, 0, 21)", "color": "rgb(255, 255, 255)" },
+      "?": { "background": "rgb(191, 191, 191)", "color": "rgb(68, 68, 68)" },
+      "5p?": { "background": "rgb(232, 93, 19)", "color": "rgb(0, 0, 0)" }
+    }, "LgInt": {
+      "1": { "background": "rgb(69, 72, 130)", "color": "rgb(216, 217, 235)" },
+      "2": { "background": "rgb(224, 157, 0)", "color": "rgb(38, 38, 38)" },
+      "3": { "background": "rgb(194, 26, 0)", "color": "rgb(255, 255, 255)" },
+      "4": { "background": "rgb(165, 0, 194)", "color": "rgb(255, 255, 255)" },
+      "?": { "background": "rgb(191, 191, 191)", "color": "rgb(68, 68, 68)" }
     },
     Tsunami: {
       TsunamiMajorWarningColor: "rgb(200, 0, 255)",
@@ -418,7 +417,7 @@ app.whenReady().then(() => {
   Create_WorkerWindow();
   //定期実行
   ScheduledExecution();
-  setInterval(ScheduledExecution, 600000);
+  setInterval(ScheduledExecution, 1200000);
 
   //↓ 「!== false」必須
   if (isFirstRunTmp) {
@@ -447,6 +446,14 @@ app.whenReady().then(() => {
     });
   }
 
+  //各種のためカスタムリファラーを送信
+  const filter = { urls: ['https://*/*'] };
+  electron.session.defaultSession.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
+    details.requestHeaders['Referer'] = 'https://0quake.github.io/ZeroQuake_Website/';
+    details.requestHeaders['User-Agent'] = `ZeroQuake/${soft_version} contact:(https://0quake.github.io/ZeroQuake_Website/contact.html)`;
+    callback({ requestHeaders: details.requestHeaders });
+  });
+
   //初期化処理
   start();
 
@@ -458,7 +465,7 @@ let options = {
   title: "エラー",
   message: "予期しないエラーが発生しました",
   detail: "動作を選択してください。",
-  buttons: ["今すぐ再起動", "終了", "無視"],
+  buttons: ["アプリを再起動", "終了", "無視"],
   noLink: true,
 };
 var errorMsgBox = false;
@@ -469,7 +476,7 @@ process.on("uncaughtException", function (err) {
     if (!errorMsgBox && app.isReady()) {
       if (String(err.stack).startsWith("Error: net::ERR_")) return false;
       errorMsgBox = true;
-      options.detail = "動作を選択してください。エラーメッセージは以下の通りです。\n************\n" + causeTree(err);
+      options.detail = `よろしければ、以下のエラーメッセージのスクリーンショット等を開発者へご報告ください。\n=================\nZeroQuake v${soft_version ? soft_version : "?.?.?"}\n\n${causeTree(err)}\n=================\n\n動作を選択してください。`;
 
       if (MainWindow) {
         dialog.showMessageBox(MainWindow, options).then(function (result) {
@@ -495,14 +502,25 @@ function causeTree(err) {
   try {
     var ErrString = err.stack;
     var i = 0;
-    while (err.cause && i < 10) {
-      ErrString += "\n[cause]:" + err.cause.stack;
-      i++;
-      err = err.cause;
-    }
+
+    try {
+      while (err.cause && i < 10) {
+        ErrString += "\n[cause]:" + err.cause.stack;
+        i++;
+        err = err.cause;
+      }
+    } catch { }
+
+    try {
+      //ユーザーのフォルダ構成を秘匿
+      var homeDir = app.getAppPath();
+      homeDir = homeDir.replaceAll("\\", "/");//バックスラッシュ対策
+      ErrString = ErrString.replace(homeDir, '<0quake_root>');
+    } catch { }
+
     return ErrString;
-  } catch {
-    return "";
+  } catch (e) {
+    return "エラーログツリーの作成に失敗";
   }
 }
 
@@ -1543,11 +1561,12 @@ function EQInfo_createWindow(response, IS_WebURL) {
 var TimeTable_JMA2001 = JSON.parse(
   await readFile(path.join(__dirname, "./Resource/TimeTable_JMA2001.json"))
 );
+var TimeTable_AK135 = JSON.parse(
+  await readFile(path.join(__dirname, "./Resource/ak135table.json"))
+);
 
 //開始処理
 function start() {
-  soft_version = packageJson.version;
-
   //地震検知ワーカー作成
   createWorker();
 
@@ -2132,7 +2151,7 @@ function Req_kmoni() {
 function Req_SNet() {
   if (config.Source.msil.GetData) {
     if (net.online) {
-      var request = net.request("https://www.msil.go.jp/tiles/smoni/targetTimes.json?" + Number(new Date()));
+      var request = net.request("https://www.msil.go.jp/data/tiles/smoni/targetTimes.json?" + Number(new Date()));
       request.on("response", (res) => {
         var dataTmp = "";
         res.on("data", (chunk) => {
@@ -2151,7 +2170,7 @@ function Req_SNet() {
             if (msil_lastTime < basetime) {
 
               function Req_SNet_core(y, unique_id) {
-                var request = net.request(`https://www.msil.go.jp/tiles/smoni/${basetime}/${basetime}/5/28/${y}.png`);
+                var request = net.request(`https://www.msil.go.jp/data/tiles/smoni/tileimage/${basetime}/${basetime}/5/28/${y}.png`);
                 request.on("response", (res) => {
                   var dataTmp = [];
                   res.on("data", (chunk) => {
@@ -2394,7 +2413,7 @@ function ProjectBS() {
     UpdateStatus(new Date() - Replay, "ProjectBS", "success");
     setInterval(function () {
       connection.sendUTF("ping");
-    }, 600000);
+    }, 1200000);
   });
 
   Connect_ProjectBS();
@@ -2529,7 +2548,7 @@ function MargeSeisJS(json) {
   };
 
   Object.keys(SeisJSData).forEach(function (elm) {
-    var dif = Number(new Date() - new Date(Number(new Date(SeisJSData[elm].update_at)) + 3600000));
+    var dif = Number(new Date() - new Date(Number(new Date(SeisJSData[elm].update_at)) + 31200000));
     if (dif > 15 * 1000) delete SeisJSData[elm];
   });
 
@@ -2920,7 +2939,14 @@ function MargeEEW(data) {
     var pastTime = new Date() - Replay - data.origin_time;
     if (!showing && (pastTime > 300000 || pastTime < 0)) return;
 
-    data.TimeTable = TimeTable_JMA2001[depthFilter(data.depth)];
+    data.TimeTable = {
+      p: TimeTable_JMA2001.p[getClosestNum(data.depth, Object.keys(TimeTable_JMA2001.p))],
+      s: TimeTable_JMA2001.s[getClosestNum(data.depth, Object.keys(TimeTable_JMA2001.s))]
+    }
+    data.TimeTable2 = {
+      p: TimeTable_AK135.p[getClosestNum(data.depth, Object.keys(TimeTable_AK135.p))],
+      s: TimeTable_AK135.s[getClosestNum(data.depth, Object.keys(TimeTable_AK135.s))]
+    }
     if (data.source == "simulation") {
       var EEWdataTmp = EEW_nowList.find(function (elm) {
         return elm.source !== "simulation";
@@ -2931,10 +2957,11 @@ function MargeEEW(data) {
         if (elm.source == "simulation") EEW_Clear(elm.EventID);
       });
     }
+    //以下はシミュレーション機能においてのみ有効。実地震で行うと予報業務となり気象業務法違反のおそれあり。
     if (data.source == "simulation" && !data.isPlum) {
       var estIntTmp = {};
       if (!data.is_cancel) {
-        if (!data.userIntensity && data.depth <= 150)
+        if (!data.userIntensity && data.depth <= 150) {
           data.userIntensity = calcInt(
             data.magnitude,
             data.depth,
@@ -2945,25 +2972,36 @@ function MargeEEW(data) {
             config.home.arv,
             config.Info.EEW.IntType == "max"
           );
-        if (!data.arrivalTime) {
-          for (let index = 0; index < data.TimeTable.length; index++) {
-            var elm = data.TimeTable[index];
-            if (elm.R > data.distance) {
+        }
+
+
+        function calc_arTime(distance, TimeTable) {
+          for (let index = 0; index < TimeTable.s.length; index++) {
+            var elm = TimeTable.s[index];
+            if ((elm.r * 111) > distance) {
               if (index > 0) {
-                var elm2 = data.TimeTable[index - 1];
-                var SSec =
-                  elm2.S +
-                  ((elm.S - elm2.S) * (data.distance - elm2.R)) / (elm2.S - elm2.R);
-              } else SSec = 0;
+                var elm2 = TimeTable.s[index - 1];
+                var SSec = elm2.s + ((elm.t - elm2.t) * (distance - (elm2.r * 111))) / (elm2.t - (elm2.r * 111));
+              } else SSec = null;
               break;
             }
           }
-          data.arrivalTime = new Date(Number(data.origin_time) + SSec * 1000);
+          return (SSec || SSec == 0) ? SSec : null;
+        }
+
+        if (!data.arrivalTime) {//JMA2001走時表での到達時刻予想
+          var res = calc_arTime(data.distance, data.TimeTable)
+          if (res) data.arrivalTime = new Date(Number(data.origin_time) + res * 1000)
+        }
+
+        if (!data.arrivalTime) {//AK135走時表での到達時刻予想
+          var res = calc_arTime(data.distance, data.TimeTable2)
+          if (res) data.arrivalTime = new Date(Number(data.origin_time) + res * 1000)
         }
         if (data.depth <= 150) {
           var maxShindo = 0;
           Object.keys(sesmicPoints).forEach(function (key) {
-            elm = sesmicPoints[key];
+            var elm = sesmicPoints[key];
             if (elm.arv && elm.sect) {
               var estInt = calcInt(
                 data.magnitude,
@@ -3122,7 +3160,14 @@ function MargeEarlyEst(data) {
     if (data.latitude && data.longitude)
       data.distance = geosailing(data.latitude, data.longitude, config.home.latitude, config.home.longitude);
 
-    data.TimeTable = TimeTable_JMA2001[depthFilter(data.depth)];
+    data.TimeTable = {
+      p: TimeTable_JMA2001.p[getClosestNum(data.depth, Object.keys(TimeTable_JMA2001.p))],
+      s: TimeTable_JMA2001.s[getClosestNum(data.depth, Object.keys(TimeTable_JMA2001.s))]
+    }
+    data.TimeTable2 = {
+      p: TimeTable_AK135.p[getClosestNum(data.depth, Object.keys(TimeTable_AK135.p))],
+      s: TimeTable_AK135.s[getClosestNum(data.depth, Object.keys(TimeTable_AK135.s))]
+    }
 
     var EQJSON = EarlyEst_Data.find(function (elm) {
       return elm.EQ_id == data.EventID;
@@ -3404,7 +3449,7 @@ function Req_JMAXMLList(LongPeriodFeed, count) {
             function (elm) {
               var ttl = elm.getElementsByTagName("title")[0];
 
-              if (ttl && ttl.textContent.startsWith("南海トラフ地震臨時情報") && Number(new Date() - new Date(elm.getElementsByTagName("updated")[0].textContent)) <= 1209600000) {
+              if (ttl && ttl.textContent.startsWith("南海トラフ地震臨時情報") && Number(new Date() - new Date(elm.getElementsByTagName("updated")[0].textContent)) <= 12091200000) {
                 Req_JMAXML(elm.getElementsByTagName("link")[0].getAttribute("href"));
               }
             }
@@ -3680,7 +3725,7 @@ function Req_JMAXML(url, count,) {
               var offset = Number(new Date() - new Date(elm.reportDate));
               return (
                 elm.title.startsWith("南海トラフ地震臨時情報") &&
-                ((elm.kind == "巨大地震警戒" && offset <= 1209600000) || elm.kind == "巨大地震注意" || elm.kind == "調査中" || (elm.kind == "調査終了" && offset <= 604800000))
+                ((elm.kind == "巨大地震警戒" && offset <= 12091200000) || elm.kind == "巨大地震注意" || elm.kind == "調査中" || (elm.kind == "調査終了" && offset <= 604800000))
               );
             });
             if (rinji) {
@@ -4425,8 +4470,8 @@ function EQCount_process(data) {
 function timeDifference(miliseconds) {
   if (isNaN(miliseconds)) return "";
   if (miliseconds < 60000) return { num: Math.round(miliseconds / 1000), unit: "秒" };
-  else if (miliseconds < 3600000) return { num: Math.round(miliseconds / 60000), unit: "分" };
-  else if (miliseconds < 86400000) return { num: Math.round(miliseconds / 3600000), unit: "時間" };
+  else if (miliseconds < 31200000) return { num: Math.round(miliseconds / 60000), unit: "分" };
+  else if (miliseconds < 86400000) return { num: Math.round(miliseconds / 31200000), unit: "時間" };
   else return { num: Math.round(miliseconds / 86400000), unit: "日" };
 }
 
@@ -5087,6 +5132,16 @@ function depthFilter(depth) {
   else if (200 <= depth) return Math.floor(depth / 10) * 10;
   else if (50 <= depth) return Math.floor(depth / 5) * 5;
   else return Math.floor(depth / 2) * 2;
+}
+function getClosestNum(needle, haystack) {
+  return haystack.reduce((a, b) => {
+    var aDiff = Math.abs(a - needle);
+    var bDiff = Math.abs(b - needle);
+
+    if (aDiff == bDiff) return a > b ? a : b;
+    else return bDiff < aDiff ? b : a;
+
+  });
 }
 function Boolean2(elm) {
   return Boolean(elm !== null && elm !== undefined && elm !== "" && !Number.isNaN(elm) && elm != "Invalid Date" && (!Array.isArray(elm) || elm.length > 0) && elm);
