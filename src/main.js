@@ -57,6 +57,7 @@ function replay(ReplayDate) {
         data: Replay,
       });
     }
+    Req_JMAXMLList(true, 0);
   } catch (err) {
     throw new Error("リプレイに失敗しました。", { cause: err });
   }
@@ -77,6 +78,7 @@ import * as turf from "@turf/turf";
 import workerThreads from "worker_threads";
 import { readFile } from "fs/promises";
 import fs from "fs";
+import url from "url";
 import { exec } from "child_process";
 var __dirname = path.dirname(fileURLToPath(import.meta.url));
 var FERegion = JSON.parse(
@@ -244,12 +246,11 @@ var thresholds;
 if (app.isPackaged) {
   //メニューバー非表示
   Menu.setApplicationMenu(false);
-}
-
-//多重起動防止
-const gotTheLock = app.requestSingleInstanceLock();
-if (!gotTheLock) {
-  app.exit(0);
+  //多重起動防止
+  const gotTheLock = app.requestSingleInstanceLock();
+  if (!gotTheLock) {
+    app.exit(0);
+  }
 }
 
 var update_data;
@@ -410,7 +411,14 @@ function ScheduledExecution() {
     }
   }
 }
-
+electron.protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'local-range-request',
+    privileges: {
+      supportFetchAPI: true,
+    }
+  }
+]);
 //準備完了イベント
 app.whenReady().then(() => {
   //ウィンドウ作成
@@ -452,6 +460,43 @@ app.whenReady().then(() => {
     details.requestHeaders['Referer'] = 'https://0quake.github.io/ZeroQuake_Website/';
     details.requestHeaders['User-Agent'] = `ZeroQuake/${soft_version} contact:(https://0quake.github.io/ZeroQuake_Website/contact.html)`;
     callback({ requestHeaders: details.requestHeaders });
+  });
+
+  electron.protocol.handle('local-range-request', (request) => {
+    try {
+      var filePath = decodeURI(request.url.slice('local-range-request://'.length))
+
+      var rangeHeader = request.headers.get("Range");
+      var stat = fs.statSync(filePath);
+      var totalSize = stat.size;
+
+      if (rangeHeader) {
+        var header_value = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+        var start = Number(header_value[1]);
+        var end = Number(header_value[2]) || totalSize - 1;
+        var ContentLength = end - start + 1;
+
+        var buffer = Buffer.alloc(ContentLength);
+        var fd = fs.openSync(filePath, "r");
+        fs.readSync(fd, buffer, 0, ContentLength, start);
+        fs.closeSync(fd);
+
+        return new Response(buffer, {
+          status: 206,
+          headers: {
+            "Content-Range": `bytes ${start}-${end}/${totalSize}`,
+            "Content-Length": String(ContentLength),
+            "Content-Type": "binary/octet-stream",
+          },
+        });
+      } else {
+        throw new Error("local-range-requestプロトコルにてRangeヘッダーなしのリクエスト。URL:" + request.url);
+      }
+    } catch (err) {
+      return new Response("500 error:" + err, {
+        status: 500,
+      });
+    }
   });
 
   //初期化処理
@@ -1567,6 +1612,7 @@ var TimeTable_AK135 = JSON.parse(
 
 //開始処理
 function start() {
+  //replay("2026/4/20 16:55:40")
   //地震検知ワーカー作成
   createWorker();
 
@@ -2591,7 +2637,7 @@ function RegularExecution(roop) {
 
     //津波情報解除
     Tsunami_Data.forEach(function (elm) {
-      if (elm.ValidDateTime <= new Date() && !elm.revocation) {
+      if (elm.ValidDateTime <= new Date() - Replay && !elm.revocation) {
         elm.revocation = true;
         ConvertTsunamiInfo(elm); //ダミーデータを送信、再度マージ処理
       }
@@ -3812,7 +3858,7 @@ function Req_JMAXML(url, count,) {
                 var ValidDateTimeTmp = new Date(xml.getElementsByTagName("ReportDateTime")[0].textContent);
                 ValidDateTimeTmp.setHours(ValidDateTimeTmp.getHours() + 12);
               }
-              if (ValidDateTimeTmp < new Date()) return;
+              if (ValidDateTimeTmp < new Date() - Replay) return;
 
               var headline = "";
               var headlineElm = xml.getElementsByTagName("Headline")[0];
@@ -4130,7 +4176,10 @@ function Req_JMAXML(url, count,) {
 
           }
           UpdateStatus(new Date() - Replay, "JMAXML", "success");
-          jmaXML_Fetched.push(url);
+          if (new Date(xml.getElementsByTagName("ReportDateTime")[0].textContent) < new Date() - Replay) {
+          //未来のデータ（リプレイ時）のため無視した場合、取得済みリストに入れない
+            jmaXML_Fetched.push(url);
+          }
         } catch {
           UpdateStatus(new Date() - Replay, "JMAXML", "Error");
         }
@@ -4539,6 +4588,8 @@ function ConvertTsunamiInfo(data) {
     if (!config.Info.TsunamiInfo.GetData) return;
     if (!config.Info.TsunamiInfo.showtraining && data.status == "訓練") return;
     if (!config.Info.TsunamiInfo.showTest && data.status == "試験") return;
+    console.log(new Date(data.issue.time).toLocaleString(), new Date(new Date() - Replay).toLocaleString())
+    if (new Date(data.issue.time) > (new Date() - Replay)) return;
 
     let tsunamiItem = Tsunami_Data.find(function (elm) {
       return (Number(new Date(elm.issue.time)) == Number(new Date(data.issue.time)) &&
@@ -5019,6 +5070,8 @@ function NormalizeShindo(str, responseType) {
         case "70":
           ShindoTmp = 9;
           break;
+        case "未":
+        case "５弱以上未入電":
         case "震度5-以上未入電":
         case "5+?":
           ShindoTmp = 10;
