@@ -243,6 +243,19 @@ var kmoniPointsDataTmp, SnetPointsDataTmp, TremRtsData_Marged;
 let tray;
 var thresholds;
 
+electron.protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'local-range-request',
+    privileges: {
+      supportFetchAPI: true,
+      standard: true,
+      secure: true,
+      corsEnabled: true,
+      bypassCSP: true
+    }
+  }
+]);
+
 if (app.isPackaged) {
   //メニューバー非表示
   Menu.setApplicationMenu(false);
@@ -411,14 +424,6 @@ function ScheduledExecution() {
     }
   }
 }
-electron.protocol.registerSchemesAsPrivileged([
-  {
-    scheme: 'local-range-request',
-    privileges: {
-      supportFetchAPI: true,
-    }
-  }
-]);
 //準備完了イベント
 app.whenReady().then(() => {
   //ウィンドウ作成
@@ -1861,8 +1866,8 @@ function Req_JMATide_sta() {
               if (cl.stations) {
                 cl.stations.forEach(function (st) {
                   if (st.code && st.lat && st.lon && st.name) {//データ有効性チェック
-                    st.threshold_warn = cl.standard.warning
-                    st.threshold_advisory = cl.standard.advisory
+                    st.threshold_warn = cl.standard.level4
+                    st.threshold_advisory = cl.standard.level5
                     stations.push(st);
                   }
                 });
@@ -1941,7 +1946,7 @@ function Req_JMATide() {
               var obsdata = {
                 code: st.code,
                 name: st.name,
-                by: st.typeName ? st.typeName : "-",
+                by: st.typeName ? st.typeName.replaceAll("（地図では自治体等）", "") : "-",
                 date: new Date(json.time) + (json.interval * json.tide.length) * 1000,
                 threshold_warn: st.threshold_warn,
                 threshold_advisory: st.threshold_advisory
@@ -4588,7 +4593,6 @@ function ConvertTsunamiInfo(data) {
     if (!config.Info.TsunamiInfo.GetData) return;
     if (!config.Info.TsunamiInfo.showtraining && data.status == "訓練") return;
     if (!config.Info.TsunamiInfo.showTest && data.status == "試験") return;
-    console.log(new Date(data.issue.time).toLocaleString(), new Date(new Date() - Replay).toLocaleString())
     if (new Date(data.issue.time) > (new Date() - Replay)) return;
 
     let tsunamiItem = Tsunami_Data.find(function (elm) {
