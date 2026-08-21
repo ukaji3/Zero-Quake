@@ -67,7 +67,7 @@
                     <div class="legend" id="legend1">
                         <img src="./img/tsunami_scale.svg" alt="地図凡例 土砂災害警戒区域">
                     </div>
-                    <div class="legend">
+                    <div class="legend" id="legend0">
                         <img src="./img/nied_jma_s_w_scale.svg" alt="地図凡例 震度">
                     </div>
                     <div class="legend" id="fillLegend">
@@ -237,9 +237,9 @@
                                 </svg>地震情報
                             </div>
                             <div id="tab1_menu4" role="tab" class="tabmenu" tabindex="-1" aria-controls="tab1_content4" aria-label="USGSの国際地震情報" title="USGSの地震情報（国際）" ZQ-focusgroup-item><span class="material-icons-round" aria-hidden="true">globe_asia</span>USGS</div>
-                            <div id="tab1_menu2" role="tab" class="tabmenu" tabindex="-1" aria-controls="tab1_content2" aria-label="地震解説情報" ZQ-focusgroup-item><span class="material-icons-round" aria-hidden="true">description</span>解説情報</div>
-                            <div id="tab1_menu5" role="tab" class="tabmenu" tabindex="-1" aria-controls="tab1_content5" aria-label="潮位観測情報" ZQ-focusgroup-item><span class="material-icons-round" aria-hidden="true">bar_chart</span>潮位観測</div>
-                            <div id="tab1_menu3" role="tab" class="tabmenu" tabindex="-1" aria-controls="tab1_content3" aria-label="国際津波情報" ZQ-focusgroup-item><span class="material-icons-round" aria-hidden="true">tsunami</span>国際津波</div>
+                            <div id="tab1_menu2" role="tab" class="tabmenu" tabindex="-1" aria-controls="tab1_content2" aria-label="地震解説情報" title="地震解説情報" ZQ-focusgroup-item><span class="material-icons-round" aria-hidden="true">description</span>解説情報</div>
+                            <div id="tab1_menu5" role="tab" class="tabmenu" tabindex="-1" aria-controls="tab1_content5" aria-label="潮位観測情報" title="潮位観測情報" ZQ-focusgroup-item><span class="material-icons-round" aria-hidden="true">bar_chart</span>潮位観測</div>
+                            <div id="tab1_menu3" role="tab" class="tabmenu" tabindex="-1" aria-controls="tab1_content3" aria-label="国際津波情報" title="国際津波情報" ZQ-focusgroup-item><span class="material-icons-round" aria-hidden="true">tsunami</span>国際津波</div>
                         </div>
                     </div>
                     <div id="tab1_content" class="tabContentWrap">
@@ -293,7 +293,27 @@
                                 </div>
 
                                 <div id="JMA_EqInfo" class="EQInfo">
-                                    <div class="mini-loading-wrap" aria-label="読み込み中"></div>
+                                    <div class="EqInfo_Sort_Wrap">
+                                        <div id="jma_update_time">更新：リアルタイム</div>
+
+                                        <label>
+                                            <span class="material-icons-round" aria-hidden="true">sort</span>
+                                            <select id="JMA_EqInfo_Sort" aria-label="気象庁の地震情報の並び順" title="並べ替え">
+                                                <option value="t">新しい順</option>
+                                                <option value="m">マグニチュード（降順）</option>
+                                                <option value="i">最大震度（降順）</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div id="JMA_ScrollWrap">
+                                        <div id="JMA_EqInfo_Data">
+                                            <div class="mini-loading-wrap" aria-label="読み込み中"></div>
+                                        </div>
+                                        <div id="JMA_loading_status">
+                                            <div id="JMA_loading_status_txt"></div>
+                                            <div class="mini-loading-wrap" id="JMA_loading_more" aria-label="さらに過去の情報を読み込み中"></div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -306,7 +326,9 @@
                                     </div>
                                 </div>
                             </template>
-                            <div id="gaikyo_update_time">読み込み中...</div>
+                            <div class="EqInfo_Sort_Wrap_t2">
+                                <div id="gaikyo_update_time">読み込み中...</div>
+                            </div>
                             <div id="gaikyo-Wrap" class="EQInfo" role="list">
                                 <div class="mini-loading-wrap" aria-label="読み込み中"></div>
                             </div>
@@ -335,7 +357,9 @@
                                         </div>
                                     </div>
                             </template>
-                            <div id="tide_update_time">読み込み中...</div>
+                            <div class="EqInfo_Sort_Wrap_t2">
+                                <div id="tide_update_time">読み込み中...</div>
+                            </div>
                             <div class="EQItemDummy EQI_tide_sample" aria-label="凡例">
                                 <div class="EQI_detailWrap" aria-hidden="true">
                                     <div class="tide_sample_wrap">
@@ -362,7 +386,9 @@
                                     </div>
                                 </div>
                             </template>
-                            <div id="wepa_update_time">読み込み中...</div>
+                            <div class="EqInfo_Sort_Wrap_t2">
+                                <div id="wepa_update_time">読み込み中...</div>
+                            </div>
                             <div id="wepa-Wrap" class="EQInfo" role="list">
                                 <div class="mini-loading-wrap" aria-label="読み込み中"></div>
                             </div>
@@ -385,9 +411,25 @@
                                 </div>
                             </template>
 
-                            <div id="usgs_update_time">読み込み中...</div>
-                            <div id="USGS_EqInfo" class="EQInfo" role="list">
-                                <div class="mini-loading-wrap" aria-label="読み込み中"></div>
+                            <div class="EqInfo_Sort_Wrap">
+                                <div id="usgs_update_time">読み込み中...</div>
+                                <label>
+                                    <span class="material-icons-round" aria-hidden="true">sort</span>
+                                    <select id="USGS_EqInfo_Sort" aria-label="USGSの地震情報の並び順" title="並べ替え">
+                                        <option value="t">新しい順</option>
+                                        <option value="m">マグニチュード（降順）</option>
+                                        <option value="i">最大震度（降順）</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div id="USGS_ScrollWrap">
+                                <div id="USGS_EqInfo" class="EQInfo" role="list">
+                                    <div class="mini-loading-wrap" aria-label="読み込み中"></div>
+                                </div>
+                                <div id="USGS_loading_status">
+                                    <div id="USGS_loading_status_txt"></div>
+                                    <div class="mini-loading-wrap" id="USGS_loading_more" aria-label="さらに過去の情報を読み込み中"></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -467,13 +509,6 @@
                         <span>nTool Earthquake API</span>
                         <div id="ntool_UT" class="timeView">読み込み中...</div>
                     </div>
-                    <div class="timeItem">
-                        <div class="statusIcon" id="USGS_ICN"></div>
-                        <span>Earthquake Catalog (USGS)</span>
-                        <div id="USGS_UT" class="timeView">読み込み中...</div>
-                    </div>
-
-
                 </div>
 
             </dialog>
@@ -490,8 +525,11 @@
 
 
 
-
-    <script src='../node_modules/maplibre-gl/dist/maplibre-gl.js'></script>
+    <script type="module">
+        import * as maplibregl from '../node_modules/maplibre-gl/dist/maplibre-gl.mjs';
+        maplibregl.setWorkerUrl('../node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs');
+        window.maplibregl = maplibregl;
+    </script>
     <script src="../node_modules/@turf/turf/turf.min.js"></script>
     <script src="./js/UIcommon.js"></script>
     <script src="../node_modules//pmtiles/dist/pmtiles.js"></script>

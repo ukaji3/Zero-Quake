@@ -168,7 +168,7 @@ sudo apt install ./dist/zeroquake_0.9.5_amd64.deb
 - © 2021 The Azeret Project Authors /
   [OFL](https://openfontlicense.org/open-font-license-official-text/)
 - © Google /
-  [Apache License, Version 2.0](https://raw.githubusercontent.com/google/material-design-icons/refs/heads/master/LICENSE)
+  [Apache License, Version 2.0](https://raw.githubusercontent.com/marella/material-symbols/refs/heads/main/LICENSE)
 
 ### その他
 - KyoshinShindoColorMap © ingen084, こんぽ

@@ -4,37 +4,37 @@ var config;
 var intColor;
 
 function NormalizeShindo(str, responseType) {
-  var ShindoTmp;
+  var IntIndex;
   switch (str) {
     case "1":
-      ShindoTmp = 1;
+      IntIndex = 1;
       break;
     case "2":
-      ShindoTmp = 2;
+      IntIndex = 2;
       break;
     case "3":
-      ShindoTmp = 3;
+      IntIndex = 3;
       break;
     case "4":
-      ShindoTmp = 4;
+      IntIndex = 4;
       break;
     case "5-":
-      ShindoTmp = 5;
+      IntIndex = 5;
       break;
     case "5+":
-      ShindoTmp = 6;
+      IntIndex = 6;
       break;
     case "6-":
-      ShindoTmp = 7;
+      IntIndex = 7;
       break;
     case "6+":
-      ShindoTmp = 8;
+      IntIndex = 8;
       break;
     case "7":
-      ShindoTmp = 9;
+      IntIndex = 9;
       break;
     default:
-      ShindoTmp = 11;
+      IntIndex = 10;
   }
 
   switch (responseType) {
@@ -55,7 +55,7 @@ function NormalizeShindo(str, responseType) {
       ];
       break;
   }
-  return ConvTable[ShindoTmp];
+  return ConvTable[IntIndex];
 }
 
 self.addEventListener("message", (event) => {
@@ -111,10 +111,17 @@ self.addEventListener("message", (event) => {
               else if (Math.abs(r - 165) < 16 && g < 16 && Math.abs(b - 33) < 16) var color = intColor["6+"];
               else if (Math.abs(r - 180) < 16 && g < 16 && Math.abs(b - 104) < 16) var color = intColor["7"];
 
-              imgData_out.data[i * 1280 + j * 4] = color[0];
-              imgData_out.data[i * 1280 + j * 4 + 1] = color[1];
-              imgData_out.data[i * 1280 + j * 4 + 2] = color[2];
-              imgData_out.data[i * 1280 + j * 4 + 3] = 255;
+              if (color) {
+                imgData_out.data[i * 1280 + j * 4] = color[0];
+                imgData_out.data[i * 1280 + j * 4 + 1] = color[1];
+                imgData_out.data[i * 1280 + j * 4 + 2] = color[2];
+                imgData_out.data[i * 1280 + j * 4 + 3] = 255;
+              } else {
+                imgData_out.data[i * 1280 + j * 4] = 0;
+                imgData_out.data[i * 1280 + j * 4 + 1] = 0;
+                imgData_out.data[i * 1280 + j * 4 + 2] = 0;
+                imgData_out.data[i * 1280 + j * 4 + 3] = 0;
+              }
             }
             x += 3 - (j % 2);
           }

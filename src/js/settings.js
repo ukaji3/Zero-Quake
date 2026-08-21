@@ -74,7 +74,6 @@ var updateVersion = document.getElementById("update-version");
 var updateBtnWrap = document.getElementById("update_BtnWrap");
 var downloadLink = document.getElementById("downloadLink");
 var update_detail = document.getElementById("update-detail");
-document.getele;
 downloadLink.addEventListener("click", function () {
   var lnk = document.createElement("a");
   lnk.href =
@@ -87,6 +86,13 @@ function configDataDraw() {
   document.getElementById("HomeName").value = config.home.name;
   document.getElementById("latitude").value = config.home.latitude;
   document.getElementById("longitude").value = config.home.longitude;
+
+  var iBounds = config.home.initialBounds;
+  document.getElementById("b_NELat").value = iBounds[1][1];
+  document.getElementById("b_NELng").value = iBounds[1][0];
+  document.getElementById("b_SWLat").value = iBounds[0][1];
+  document.getElementById("b_SWLng").value = iBounds[0][0];
+
   document.getElementById("EEW_Voice").value = config.notice.voice.EEW;
   document.getElementById("EEW2_Voice").value = config.notice.voice.EEWUpdate;
   document.getElementById("EEW3_Voice").value = config.notice.voice.EEWCancel;
@@ -96,7 +102,6 @@ function configDataDraw() {
 
   document.getElementById("EQInfo_Voice1").value = config.notice.voice.EQInfo;
   document.getElementById("EQInfo_Voice2").value = config.notice.voice.EQInfoCancel;
-  document.getElementById("EQInfo_ItemCount").value = config.Info.EQInfo.ItemCount;
   document.getElementById("EEW_training").checked = config.Info.EEW.showtraining;
   document.getElementById("EEW_IntQ").checked = config.Info.EEW.IntQuestion;
   document.getElementById("EEW_IntI").checked = config.Info.EEW.IntTerm1;
@@ -154,7 +159,7 @@ function configDataDraw() {
   document.getElementById("TREM-RTS_GetData").checked = config.Source.TREMRTS.GetData;
   document.getElementById("TREM-RTS_Interval").value = config.Source.TREMRTS.Interval / 1000;
 
-  document.getElementById("VoiceEngine_" + config.notice.voice_parameter.engine).checked = true;
+  document.getElementById(`VoiceEngine_${config.notice.voice_parameter.engine}`).checked = true;
   document.getElementById("Boyomi_Port").value = config.notice.voice_parameter.Boyomi_Port;
   document.getElementById("CustomCommand").value = config.notice.voice_parameter.CustomCommand || "espeak-ng -v ja '{text}'";
 
@@ -224,14 +229,14 @@ function UpdateDataDraw(data) {
       updateWrap.classList.add("U-available");
       updateStatus.innerText = "更新が利用可能です。";
       updateVersion.innerText =
-        "ver." + data.current_version + " > ver." + data.latest_version;
+        `ver.${data.current_version} > ver.${data.latest_version}`;
       update_detail.innerText = data.update_detail;
       updateBtnWrap.style.display = "block";
       update_detail.style.display = "block";
     } else {
       updateWrap.classList.add("U-not_available");
       updateStatus.innerText = "アプリケーションは最新の状態です。";
-      updateVersion.innerText = "ver." + data.current_version;
+      updateVersion.innerText = `ver.${data.current_version}`;
     }
   }
 }
@@ -278,6 +283,25 @@ function apply() {
   config.home.name = document.getElementById("HomeName").value;
   config.home.latitude = document.getElementById("latitude").value;
   config.home.longitude = document.getElementById("longitude").value;
+
+  var iBounds = config.home.initialBounds = [
+    [document.getElementById("b_SWLng").value,
+    document.getElementById("b_SWLat").value],
+    [document.getElementById("b_NELng").value,
+    document.getElementById("b_NELat").value]
+  ];
+
+  //面積ゼロ回避
+  if (iBounds[0][0] == iBounds[1][0]) {
+    iBounds[0][0] = Number(iBounds[0][0]) - 0.5
+    iBounds[1][0] = Number(iBounds[1][0]) + 0.5
+  }
+  if (iBounds[0][1] == iBounds[1][1]) {
+    iBounds[0][1] = Number(iBounds[0][1]) - 0.5
+    iBounds[1][1] = Number(iBounds[1][1]) + 0.5
+  }
+
+
   config.home.Section = document.getElementById("saibun").value;
   config.home.TsunamiSect = document.getElementById("tsunamiSect").value;
   config.notice.voice.EEW = document.getElementById("EEW_Voice").value;
@@ -288,7 +312,6 @@ function apply() {
   config.notice.voice.TsunamiTorikeshi = document.getElementById("Tsunami_Voice3").value;
   config.notice.voice.EQInfo = document.getElementById("EQInfo_Voice1").value;
   config.notice.voice.EQInfoCancel = document.getElementById("EQInfo_Voice2").value;
-  config.Info.EQInfo.ItemCount = Number(document.getElementById("EQInfo_ItemCount").value);
   config.Info.EEW.showtraining = document.getElementById("EEW_training").checked;
   config.Info.EEW.IntQuestion = document.getElementById("EEW_IntQ").checked;
   config.Info.EEW.IntTerm1 = document.getElementById("EEW_IntI").checked;
@@ -404,7 +427,7 @@ function offsetCalc() {
     var hours = Math.floor((Replay / 1000 / 60 / 60) % 24);
     var minutes = Math.floor((Replay / 1000 / 60) % 60);
     var seconds = Math.floor((((Replay / 1000) % 24) % 60) % 60);
-    document.getElementById("replayOffset").innerText = "- " + day + "日 " + hours + "時間" + minutes + "分" + seconds + "秒";
+    document.getElementById("replayOffset").innerText = `- ${day}日 ${hours}時間${minutes}分${seconds}秒`;
   }
 }
 
@@ -903,7 +926,7 @@ function MapReDraw() {
   });
 
   markerElm.setLngLat([lng, lat]);
-  fetch("https://www.j-shis.bosai.go.jp/map/api/sstrct/V4/meshinfo.geojson?position=" + lng + "," + lat + "&epsg=4612&attr=ARV")
+  fetch(`https://www.j-shis.bosai.go.jp/map/api/sstrct/V4/meshinfo.geojson?position=${lng},${lat}&epsg=4612&attr=ARV`)
     .then(function (res) { return res.json(); })
     .then(function (json) {
       if (json.features && json.features[0].properties)
@@ -938,7 +961,7 @@ speechSynthesis.onvoiceschanged = () => {
     if (config && elm.name == config.notice.voice_parameter.voice)
       selectedT = " selected";
 
-    opts += "<option" + selectedT + " value='" + elm.name + "'>" + elm.name + "</option>";
+    opts += `<option${selectedT} value='${elm.name}'>${elm.name}</option>`;
   });
   TTSVoiceSelect.innerHTML = opts;
 };
@@ -987,7 +1010,7 @@ function speak(text, engine) {
           var voiceElm = json.voiceList.find(function (elm) {
             return elm.id == document.getElementById("BoyomiVoiceSelect").value;
           });
-          if (voiceElm) voice_parameter = "&voice=" + document.getElementById("BoyomiVoiceSelect").value;
+          if (voiceElm) voice_parameter = `&voice=${document.getElementById("BoyomiVoiceSelect").value}`;
 
           fetch(`http://localhost:${document.getElementById("Boyomi_Port").value}/Talk?text=${text}${voice_parameter}&speed=${TTSspeed * 100}&volume=${TTSvolume * 100}&tone=${TTSpitch * 100}`)
             .catch(function () {

@@ -9,6 +9,7 @@ window.electronAPI.messageSend((event, request) => {
 });
 
 function SetShindoColor() {
+  if (!config) return;
   root.style.setProperty("--IntTheme_Q_BgColor", config.color.Shindo["?"].background);
   root.style.setProperty("--IntTheme_0_BgColor", config.color.Shindo["0"].background);
   root.style.setProperty("--IntTheme_1_BgColor", config.color.Shindo["1"].background);
@@ -62,12 +63,12 @@ document.querySelectorAll(".tabmenu").forEach(function (elm) {
   elm.addEventListener("click", function () {
     var id = this.getAttribute("id").split("_")[0];
 
-    document.querySelectorAll("#" + id + "_bar .active_tabmenu").forEach(function (elm2) {
+    document.querySelectorAll(`#${id}_bar .active_tabmenu`).forEach(function (elm2) {
       elm2.classList.remove("active_tabmenu");
       elm2.setAttribute("aria-selected", false);
     });
 
-    document.querySelectorAll("#" + id + "_content > .active_tabcontent").forEach(function (elm2) {
+    document.querySelectorAll(`#${id}_content > .active_tabcontent`).forEach(function (elm2) {
       elm2.classList.remove("active_tabcontent");
     });
     elm.classList.add("active_tabmenu");
@@ -79,110 +80,110 @@ document.querySelectorAll(".tabmenu").forEach(function (elm) {
 //震度フォーマット
 //eslint-disable-next-line
 function NormalizeShindo(str, responseType) {
-  var ShindoTmp;
-  if (str === null || str === undefined) ShindoTmp = 11;
-  else if (isNaN(str)) {
-    str = String(str)
-      .replace(/[０-９]/g, function (s) {
-        return String.fromCharCode(s.charCodeAt(0) - 0xfee0);
-      }).replaceAll("＋", "+").replaceAll("－", "-").replaceAll("強", "+").replaceAll("弱", "-").replace(/\s+/g, "");
-    switch (str) {
-      case "1":
-      case "10":
-        ShindoTmp = 1;
-        break;
-      case "2":
-      case "20":
-        ShindoTmp = 2;
-        break;
-      case "3":
-      case "30":
-        ShindoTmp = 3;
-        break;
-      case "4":
-      case "40":
-        ShindoTmp = 4;
-        break;
-      case "5-":
-      case "45":
-        ShindoTmp = 5;
-        break;
-      case "5+":
-      case "50":
-        ShindoTmp = 6;
-        break;
-      case "6-":
-      case "55":
-        ShindoTmp = 7;
-        break;
-      case "6+":
-      case "60":
-        ShindoTmp = 8;
-        break;
-      case "7":
-      case "70":
-        ShindoTmp = 9;
-        break;
-      case "未":
-      case "５弱以上未入電":
-      case "震度5-以上未入電":
-      case "5+?":
-        ShindoTmp = 10;
-        break;
-      case "-1":
-      case "?":
-      case "不明":
-      default:
-        ShindoTmp = 11;
+  try {
+    var p2p_table = { "10": 1, "20": 2, "30": 3, "40": 4, "45": 5, "50": 6, "55": 7, "60": 8, "70": 9 }
+    var IntIndex = 11;
+    if (str === null || str === undefined) {
+      IntIndex = 11;//不明
+    } else if (p2p_table[str]) {
+      IntIndex = p2p_table[str]//p2pの2桁フォーマット
+    } else if (isNaN(str)) {
+      str = String(str)
+        .replace(/[０-９]/g, function (s) {
+          return String.fromCharCode(s.charCodeAt(0) - 0xfee0);
+        }).replaceAll("＋", "+").replaceAll("－", "-").replaceAll("強", "+").replaceAll("弱", "-").replace(/\s+/g, "");
+      switch (str) {
+        case "1":
+          IntIndex = 1;
+          break;
+        case "2":
+          IntIndex = 2;
+          break;
+        case "3":
+          IntIndex = 3;
+          break;
+        case "4":
+          IntIndex = 4;
+          break;
+        case "5-":
+          IntIndex = 5;
+          break;
+        case "5+":
+          IntIndex = 6;
+          break;
+        case "6-":
+          IntIndex = 7;
+          break;
+        case "6+":
+          IntIndex = 8;
+          break;
+        case "7":
+          IntIndex = 9;
+          break;
+        case "未":
+        case "５弱以上未入電":
+        case "震度5-以上未入電":
+        case "5+?":
+          IntIndex = 10;
+          break;
+        case "-1":
+        case "?":
+        case "不明":
+        default:
+          IntIndex = 11;
+      }
+    } else {
+      if (str < 0.5) IntIndex = 0;
+      else if (str < 1.5) IntIndex = 1;
+      else if (str < 2.5) IntIndex = 2;
+      else if (str < 3.5) IntIndex = 3;
+      else if (str < 4.5) IntIndex = 4;
+      else if (str < 5) IntIndex = 5;
+      else if (str < 5.5) IntIndex = 6;
+      else if (str < 6) IntIndex = 7;
+      else if (str < 6.5) IntIndex = 8;
+      else if (6.5 <= str) IntIndex = 9;
+      else IntIndex = 11;
     }
-  } else {
-    if (str < 0.5) ShindoTmp = 0;
-    else if (str < 1.5) ShindoTmp = 1;
-    else if (str < 2.5) ShindoTmp = 2;
-    else if (str < 3.5) ShindoTmp = 3;
-    else if (str < 4.5) ShindoTmp = 4;
-    else if (str < 5) ShindoTmp = 5;
-    else if (str < 5.5) ShindoTmp = 6;
-    else if (str < 6) ShindoTmp = 7;
-    else if (str < 6.5) ShindoTmp = 8;
-    else if (6.5 <= str) ShindoTmp = 9;
-    else ShindoTmp = 11;
+    switch (responseType) {
+      case 1:
+        var ConvTable = ["0", "1", "2", "3", "4", "5弱", "5強", "6弱", "6強", "7", "５弱以上未入電", "不明",];
+        break;
+      case 2:
+        var ConvTable = [
+          [config.color.Shindo["0"].background, config.color.Shindo["0"].color],
+          [config.color.Shindo["1"].background, config.color.Shindo["1"].color],
+          [config.color.Shindo["2"].background, config.color.Shindo["2"].color],
+          [config.color.Shindo["3"].background, config.color.Shindo["3"].color],
+          [config.color.Shindo["4"].background, config.color.Shindo["4"].color],
+          [config.color.Shindo["5m"].background, config.color.Shindo["5m"].color],
+          [config.color.Shindo["5p"].background, config.color.Shindo["5p"].color],
+          [config.color.Shindo["6m"].background, config.color.Shindo["6m"].color],
+          [config.color.Shindo["6p"].background, config.color.Shindo["6p"].color],
+          [config.color.Shindo["7"].background, config.color.Shindo["7"].color],
+          [config.color.Shindo["5p?"].background, config.color.Shindo["5p?"].color],
+          [config.color.Shindo["?"].background, config.color.Shindo["?"].color],
+        ];
+        break;
+      case 3:
+        var ConvTable = [null, "1", "2", "3", "4", "5m", "5p", "6m", "6p", "7", "5p?", null,
+        ];
+        break;
+      case 4:
+        var ConvTable = [0, 1, 2, 3, 4, 4.5, 5, 5.5, 6, 7, 4.5, null];
+        break;
+      case 5:
+        var ConvTable = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 4.5, 0];
+        break;
+      case 0:
+      default:
+        var ConvTable = ["0", "1", "2", "3", "4", "5-", "5+", "6-", "6+", "7", "未", "?"];
+        break;
+    }
+    return ConvTable[IntIndex];
+  } catch {
+    return "?";
   }
-  switch (responseType) {
-    case 1:
-      var ConvTable = ["0", "1", "2", "3", "4", "5弱", "5強", "6弱", "6強", "7", "５弱以上未入電", "不明"];
-      break;
-    case 2:
-      var ConvTable = [
-        [config.color.Shindo["0"].background, config.color.Shindo["0"].color],
-        [config.color.Shindo["1"].background, config.color.Shindo["1"].color],
-        [config.color.Shindo["2"].background, config.color.Shindo["2"].color],
-        [config.color.Shindo["3"].background, config.color.Shindo["3"].color],
-        [config.color.Shindo["4"].background, config.color.Shindo["4"].color],
-        [config.color.Shindo["5m"].background, config.color.Shindo["5m"].color],
-        [config.color.Shindo["5p"].background, config.color.Shindo["5p"].color],
-        [config.color.Shindo["6m"].background, config.color.Shindo["6m"].color],
-        [config.color.Shindo["6p"].background, config.color.Shindo["6p"].color],
-        [config.color.Shindo["7"].background, config.color.Shindo["7"].color],
-        [config.color.Shindo["5p?"].background, config.color.Shindo["5p?"].color],
-        [config.color.Shindo["?"].background, config.color.Shindo["?"].color],
-      ];
-      break;
-    case 3:
-      var ConvTable = [null, "1", "2", "3", "4", "5m", "5p", "6m", "6p", "7", "5p?", null];
-      break;
-    case 4:
-      var ConvTable = [0, 1, 2, 3, 4, 4.5, 5, 5.5, 6, 7, 4.5, null];
-      break;
-    case 5:
-      var ConvTable = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 4.5, 0];
-      break;
-    case 0:
-    default:
-      var ConvTable = ["0", "1", "2", "3", "4", "5-", "5+", "6-", "6+", "7", "未", "?"];
-      break;
-  }
-  return ConvTable[ShindoTmp];
 }
 
 document.querySelectorAll("input[type=number]").forEach(function (elm) {
@@ -192,7 +193,9 @@ document.querySelectorAll("input[type=number]").forEach(function (elm) {
     var min = this.getAttribute("min");
     if (Number(min) > Number(this.value)) this.value = min;
     var step = this.getAttribute("step");
-    if (Number(this.value) % Number(step) == 0) this.value = Math.floor(this.value / step) * step;
+    if (Number(this.value) % Number(step) !== 0) {
+      this.value = Math.floor(this.value / step) * step;
+    }
   });
 });
 
@@ -210,6 +213,7 @@ function NormalizeMMI(str, responseType) {
       var ConvTable = ["?", "Ⅰ", "Ⅱ", "Ⅲ", "Ⅳ", "Ⅴ", "Ⅵ", "Ⅶ", "Ⅷ", "Ⅸ", "Ⅹ", "Ⅺ", "Ⅻ"];
       break;
     case 2:
+      if (!config) return ["#00000000", "#00000000"];
       var ConvTable = [
         [config.color.Shindo["?"].background, config.color.Shindo["?"].color],
         [config.color.Shindo["0"].background, config.color.Shindo["0"].color],
@@ -235,6 +239,7 @@ function NormalizeMMI(str, responseType) {
 
 //eslint-disable-next-line
 function LgIntConvert(str) {
+  if (!config) return "#000000";
   switch (String(str)) {
     case "1":
       return [config.color.LgInt["1"].background, config.color.LgInt["1"].color];
@@ -253,55 +258,60 @@ function LgIntConvert(str) {
 //日時フォーマット
 //eslint-disable-next-line
 function NormalizeDate(type, date) {
-  if (!date) date = new Date();
-  else date = new Date(date);
-  if (Number.isNaN(date.getTime())) return "";
+  try {
+    if (!date) date = new Date();
+    else date = new Date(date);
+    if (Number.isNaN(date.getTime())) throw new Error();
 
-  var YYYY = String(date.getFullYear());
-  var YY = String(date.getFullYear()).slice(-2);
-  var MM = String(date.getMonth() + 1).padStart(2, "0");
-  var DD = String(date.getDate()).padStart(2, "0");
-  var hh = String(date.getHours()).padStart(2, "0");
-  var mm = String(date.getMinutes()).padStart(2, "0");
-  var ss = String(date.getSeconds()).padStart(2, "0");
-  var M = String(date.getMonth() + 1);
-  var D = String(date.getDate());
-  var h = String(date.getHours());
-  var m = String(date.getMinutes());
-  var s = String(date.getSeconds());
-  var isToday = date.toDateString() == new Date().toDateString();
-  if (typeof type === "string" || type instanceof String) {
-    return type.replaceAll("YYYY", YYYY).replaceAll("YY", YY).replaceAll("MM", MM).replaceAll("DD", DD).replaceAll("hh", hh).replaceAll("mm", mm).replaceAll("ss", ss).replaceAll("M", M).replaceAll("D", D).replaceAll("h", h).replaceAll("m", m).replaceAll("s", s);
-  }
-  switch (type) {
-    case 1:
-      return YYYY + MM + DD + hh + mm + ss;
-    case 2:
-      return YYYY + MM + DD;
-    case 3:
-      return YYYY + "/" + MM + "/" + DD + " " + hh + ":" + mm + ":" + ss;
-    case 4:
-      return YYYY + "/" + MM + "/" + DD + " " + hh + ":" + mm;
-    case 5:
-      return D + "日 " + hh + ":" + mm;
-    case 6:
-      return hh + ":" + mm;
-    case 7:
-      return hh + "時" + mm + "分" + ss + "秒";
-    case 8:
-      return h + "時" + m + "分" + s + "秒";
-    case 9:
-      var date_str = "";
-      if (!isToday) date_str = D + "日 ";
-      return date_str + h + "時" + m + "分";
-    case 10:
-      var date_str = "";
-      if (!isToday) date_str = D + "日 ";
-      return date_str + hh + ":" + mm;
-    default:
-      return new Date().toLocaleString("ja-jp");
+    var YYYY = String(date.getFullYear());
+    var YY = String(date.getFullYear()).slice(-2);
+    var MM = String(date.getMonth() + 1).padStart(2, "0");
+    var DD = String(date.getDate()).padStart(2, "0");
+    var hh = String(date.getHours()).padStart(2, "0");
+    var mm = String(date.getMinutes()).padStart(2, "0");
+    var ss = String(date.getSeconds()).padStart(2, "0");
+    var M = String(date.getMonth() + 1);
+    var D = String(date.getDate());
+    var h = String(date.getHours());
+    var m = String(date.getMinutes());
+    var s = String(date.getSeconds());
+    var isToday = date.toDateString() == new Date().toDateString();
+    if (typeof type === "string" || type instanceof String) {
+      return type.replaceAll("YYYY", YYYY).replaceAll("YY", YY).replaceAll("MM", MM).replaceAll("DD", DD).replaceAll("hh", hh).replaceAll("mm", mm).replaceAll("ss", ss).replaceAll("M", M).replaceAll("D", D).replaceAll("h", h).replaceAll("m", m).replaceAll("s", s);
+    }
+    switch (type) {
+      case 1:
+        return `${YYYY}${MM}${DD}${hh}${mm}${ss}`;
+      case 2:
+        return `${YYYY}${MM}${DD}`;
+      case 3:
+        return `${YYYY}/${MM}/${DD} ${hh}:${mm}:${ss}`;
+      case 4:
+        return `${YYYY}/${MM}/${DD} ${hh}:${mm}`;
+      case 5:
+        return `${D}日 ${hh}:${mm}`;
+      case 6:
+        return `${hh}:${mm}`;
+      case 7:
+        return `${hh}時${mm}分${ss}秒`;
+      case 8:
+        return `${h}時${m}分${s}秒`;
+      case 9:
+        var date_str = "";
+        if (!isToday) date_str = `${D}日 `;
+        return `${date_str}${h}時${m}分`;
+      case 10:
+        var date_str = "";
+        if (!isToday) date_str = `${D}日 `;
+        return `${date_str}${hh}:${mm}`;
+      default:
+        return new Date().toLocaleString("ja-jp");
+    }
+  } catch {
+    return new Date().toLocaleString("ja-jp");
   }
 }
+
 //子要素一括削除
 //eslint-disable-next-line
 function removeChild(element) {
@@ -351,3 +361,6 @@ window.addEventListener("keydown", (event) => {
     if (tagname == "DIV" || tagname == "SPAN") document.activeElement.dispatchEvent(new PointerEvent("click"));
   }
 });
+function Boolean2(elm) {
+  return Boolean(elm !== null && elm !== undefined && elm !== "" && !Number.isNaN(elm) && elm != "Invalid Date" && (!Array.isArray(elm) || elm.length > 0) && elm || elm === 0);
+}
