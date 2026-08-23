@@ -4229,6 +4229,7 @@ function MargeEQInfo(dataList, count) {
               changed = true;//変更ありフラグ
             }
           } else if (key == "axisData") {
+            if (!Array.isArray(EQElm[key])) EQElm[key] = [];//既存側が配列でない場合（null等）は初期化
             EQInfo_Item[key].forEach(function (elm) {
               var uuid = elm.message.uuid_
               var exists = EQElm[key].find((el) => {
