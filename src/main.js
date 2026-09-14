@@ -36,6 +36,84 @@ if (DEBUG_MODE) {
   console.log('[DEBUG] Ozone platform:', process.env.ELECTRON_OZONE_PLATFORM_HINT);
 }
 
+/**
+ * デバッグモード時のみ時刻付きでログ出力する（Issue #27）
+ * @param {...unknown} args 出力内容
+ */
+function debugLog(...args) {
+  if (DEBUG_MODE) console.log(new Date().toLocaleString(), '[DEBUG]', ...args);
+}
+
+/**
+ * HTTP レスポンスの状態を検査し、失敗時は情報源名と URL を含むエラーを投げる（Issue #27）
+ * @param {Response} r fetch のレスポンス
+ * @param {string} source 情報源名
+ * @returns {Response} 成功時はそのまま返す
+ */
+function ensureOk(r, source) {
+  if (!r.ok) throw new Error(`HTTP Error: ${r.status} (${source}: ${r.url})`);
+  return r;
+}
+
+/**
+ * オブジェクト（キー→要素）の保持件数を上限以下に刈り込む（Issue #24）。
+ * 上限超過分は sortKey の値が小さい（古い）ものから削除する。
+ * @param {Record<string, object>} obj 対象オブジェクト
+ * @param {number} max 最大保持件数
+ * @param {(item: object) => number} sortKey 並び替えキー（大きいほど新しい）
+ * @returns {number} 削除件数
+ */
+function pruneObjectByCount(obj, max, sortKey) {
+  var keys = Object.keys(obj);
+  if (keys.length <= max) return 0;
+  keys.sort(function (a, b) { return sortKey(obj[a]) - sortKey(obj[b]); });
+  var removeCount = keys.length - max;
+  for (let i = 0; i < removeCount; i++) delete obj[keys[i]];
+  return removeCount;
+}
+
+/**
+ * 配列の保持件数を上限以下に刈り込む（Issue #24）。
+ * 上限超過分は sortKey の値が小さい（古い）ものから削除し、元の配列を in-place で更新する。
+ * @param {object[]} arr 対象配列
+ * @param {number} max 最大保持件数
+ * @param {(item: object) => number} sortKey 並び替えキー（大きいほど新しい）
+ * @returns {number} 削除件数
+ */
+function pruneArrayByCount(arr, max, sortKey) {
+  if (arr.length <= max) return 0;
+  var sorted = arr.slice().sort(function (a, b) { return sortKey(b) - sortKey(a); });
+  var keep = new Set(sorted.slice(0, max));
+  var before = arr.length;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (!keep.has(arr[i])) arr.splice(i, 1);
+  }
+  return before - arr.length;
+}
+
+/**
+ * 配列の先頭（最古）から削除して件数を上限以下にする（挿入順＝時系列の配列向け。Issue #24）
+ * @param {unknown[]} arr 対象配列
+ * @param {number} max 最大保持件数
+ */
+function truncateOldest(arr, max) {
+  if (arr.length > max) arr.splice(0, arr.length - max);
+}
+
+/** 保持データの上限（Issue #24） */
+const RETENTION_LIMITS = {
+  EQInfoData: 300,
+  EQInfoRawData: 50,
+  eqInfoJmaMin: 100,
+  EQCount: 100,
+  EEWStorage: 50,
+  EEWStorageData: 30,
+  EarlyEst: 100,
+  Tsunami: 100,
+  InfoAll: 50,
+  jmaXMLFetched: 2000,
+};
+
 //リプレイ
 var Replay = 0;
 var MainWindow, SettingWindow, TsunamiWindow, WorkerWindow;
@@ -233,9 +311,14 @@ var KmoniOffset = 2500;
 
 var EQDetect_List = [];
 
-var jmaXML_Fetched = [];
+/** 取得済み JMA XML の URL。Set + 上限で有界化（Issue #24 / #11） */
+var jmaXML_Fetched = new Set();
 var eqInfo = { jma: [], usgs: [] };
 var kmoniPointsDataTmp, SnetPointsDataTmp, TremRtsData_Marged;
+/** K-NET/KiK-net 観測点マスタ（WorkerWindow から受信。MainWindow/worker へ再送するため保持）Issue #19 */
+var KmoniStationMaster = null;
+/** TREM-RTS 観測点マスタの MainWindow 向けメッセージ（再送用） */
+var TremRtsMaster_Msg = null;
 let tray;
 var thresholds;
 
@@ -301,7 +384,7 @@ var checkUpdate = throttle(async function (userAction) {
 
     fetch(`https://api.github.com/repos/0quake/Zero-Quake/releases?_=${Number(new Date())}`)
       .then((r) => {
-        if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+        ensureOk(r, "GitHub Releases");
         return r.json();
       }).then((json) => {
         var latest_verTmp = String(json[0].tag_name).replace("v", "");
@@ -370,7 +453,7 @@ var checkUpdate = throttle(async function (userAction) {
         }
 
       }).catch((err) => {
-        GeneralError_handler(err)
+        GeneralError_handler(err, "GitHub Releases")
         UpdateError(err);
       });
 
@@ -386,7 +469,7 @@ function ScheduledExecution() {
 
   fetch(`https://axis.prioris.jp/api/token/refresh/?token=${config.Source.axis.AccessToken}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "Axis token");
       return r.json();
     }).then((json) => {
       if (json.status == "generate a new token") {
@@ -407,7 +490,7 @@ function ScheduledExecution() {
         SystemNotification("Axisのアクセストークンが不正です。設定を修正してください。");
       }
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "Axis token")
       UpdateStatus("axis", "Error");
     });
 }
@@ -540,8 +623,13 @@ process.on("uncaughtException", function (err) {
   }
 });
 
-function GeneralError_handler(err) {
-  console.error(new Date().toLocaleString(), err)
+/**
+ * 共通エラーハンドラ。情報源名を先頭に付けて出力する（Issue #27）
+ * @param {unknown} err エラー
+ * @param {string} [source] 情報源名（省略時は "unknown"）
+ */
+function GeneralError_handler(err, source) {
+  console.error(new Date().toLocaleString(), `[${source || "unknown"}]`, err)
 }
 
 //エラーメッセージの作成。エラー原因のツリー
@@ -765,8 +853,11 @@ app.on("second-instance", CreateMainWindow);
 //レンダラープロセスからのメッセージ
 ipcMain.on("message", (_event, response) => {
   switch (response.action) {
+    case "kmoniMaster":
+      SetKmoniMaster(response.data);
+      break;
     case "kmoniReturn":
-      ConvertKmoni(response.data, response.date);
+      ConvertKmoni(response);
       break;
     case "SnetReturn":
       ConvertSnet(response.data, response.date, response.y, response.uid);
@@ -841,8 +932,11 @@ ipcMain.on("message", (_event, response) => {
       }
       break;
     case "mapLoaded":
+      //マスタ → 最新値 の順で送る（受信側はマスタ未受信の値を破棄するため順序が重要）
+      if (KmoniStationMaster) messageToMainWindow({ action: "kmoniMaster", data: KmoniStationMaster });
       if (kmoniPointsDataTmp) messageToMainWindow(kmoniPointsDataTmp);
       if (SnetPointsDataTmp) messageToMainWindow(SnetPointsDataTmp);
+      if (TremRtsMaster_Msg) messageToMainWindow(TremRtsMaster_Msg);
       if (TremRtsData_Marged) messageToMainWindow(TremRtsData_Marged);
       break;
     case "replay":
@@ -1107,8 +1201,10 @@ function CreateMainWindow() {
           }
         });
 
+        if (KmoniStationMaster) messageToMainWindow({ action: "kmoniMaster", data: KmoniStationMaster });
         if (kmoniPointsDataTmp) messageToMainWindow(kmoniPointsDataTmp);
         if (SnetPointsDataTmp) messageToMainWindow(SnetPointsDataTmp);
+        if (TremRtsMaster_Msg) messageToMainWindow(TremRtsMaster_Msg);
         if (NankaiTroughInfo) {
           messageToMainWindow({
             action: "NankaiTroughInfo",
@@ -1190,32 +1286,66 @@ function CreateMainWindow() {
   }
 }
 //ワーカーウィンドウ表示処理
+/** WorkerWindow 再生成の上限（10 分間に 5 回。超過時は自動再生成を停止する）Issue #25 */
+const WORKER_RECREATE_WINDOW_MS = 600000;
+const WORKER_RECREATE_MAX = 5;
+var workerRecreateHistory = [];
+/** アプリ終了処理中（終了時のウィンドウ close で再生成を予約しないため） */
+var appQuitting = false;
+app.on("before-quit", () => { appQuitting = true; });
+
+/**
+ * 非表示の WorkerWindow（強震モニタ画像解析・音声再生）を生成する。
+ * 既存ウィンドウを閉じて作り直す場合、close ハンドラの自動再生成が二重に走らないよう
+ * `intentionalClose` フラグで抑止する（Issue #25: 2 秒周期の再生成ループ防止）。
+ */
 function Create_WorkerWindow() {
-  if (WorkerWindow) WorkerWindow.close();
-  WorkerWindow = new BrowserWindow({
-    webPreferences: { preload: path.join(__dirname, "js/preload.js") },
-    backgroundThrottling: false,
+  if (appQuitting) return;
+  var now = Date.now();
+  workerRecreateHistory = workerRecreateHistory.filter(function (t) { return now - t < WORKER_RECREATE_WINDOW_MS; });
+  if (workerRecreateHistory.length >= WORKER_RECREATE_MAX) {
+    console.error(new Date().toLocaleString(), "[WorkerWindow]", `再生成が ${WORKER_RECREATE_MAX} 回/${WORKER_RECREATE_WINDOW_MS / 60000} 分を超えたため自動再生成を停止します`);
+    return;
+  }
+  workerRecreateHistory.push(now);
+
+  if (WorkerWindow && !WorkerWindow.isDestroyed()) {
+    WorkerWindow.intentionalClose = true;
+    WorkerWindow.close();
+  }
+  var win = new BrowserWindow({
+    webPreferences: {
+      preload: path.join(__dirname, "js/preload.js"),
+      backgroundThrottling: false, //非表示でも毎秒処理を止めない（webPreferences 内でのみ有効。Issue #21）
+    },
     show: false,
   });
-  WorkerWindow.on("close", () => {
-    WorkerWindow = null;
+  WorkerWindow = win;
+  debugLog("WorkerWindow created");
+  win.on("close", () => {
+    if (WorkerWindow === win) WorkerWindow = null;
+    if (win.intentionalClose || appQuitting) return; //意図的な閉鎖（作り直し）・終了中は再生成を予約しない
+    debugLog("WorkerWindow closed unexpectedly; scheduling recreate");
     setTimeout(Create_WorkerWindow, 2000)
   });
-  WorkerWindow.webContents.on("did-finish-load", () => {
-    WorkerWindow.webContents.send("message2", {
+  win.webContents.on("did-finish-load", () => {
+    win.webContents.send("message2", {
       action: "setting",
       data: config,
     });
   });
-  WorkerWindow.loadFile("src/WorkerWindow.html");
-  WorkerWindow.on("unresponsive", () => {
-    WorkerWindow.responsive = true;
+  win.loadFile("src/WorkerWindow.html");
+  win.on("unresponsive", () => {
+    win.responsive = true;
     setTimeout(function () {
-      if (WorkerWindow.responsive) Create_WorkerWindow();
+      if (WorkerWindow === win && !win.isDestroyed() && win.responsive) {
+        debugLog("WorkerWindow unresponsive; recreating");
+        Create_WorkerWindow();
+      }
     }, 5000);
   });
-  WorkerWindow.on("responsive", () => {
-    WorkerWindow.responsive = false;
+  win.on("responsive", () => {
+    win.responsive = false;
   });
 }
 //設定ウィンドウ表示処理
@@ -1663,7 +1793,7 @@ function start() {
 function Req_JMA_gaikyo() {
   fetch(`https://www.data.jma.go.jp/svd/eqev/data/gaikyo/?_=${Number(new Date())}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA gaikyo");
       return r.text();
     }).then((text) => {
       const doc = DomPsr.parseFromString(text, "text/html");
@@ -1721,7 +1851,7 @@ function Req_JMA_gaikyo() {
       data.sort((a, b) => a.date < b.date ? 1 : -1);
       messageToMainWindow({ action: "Return_gaikyo", data: data });
     }).catch((err) => {
-      GeneralError_handler(err);
+      GeneralError_handler(err, "JMA gaikyo");
       messageToMainWindow({ action: "Return_gaikyo", data: [] });
     });
 }
@@ -1729,47 +1859,61 @@ function Req_JMA_gaikyo() {
 function Req_JMA_wepa() {
   fetch(`https://www.jma.go.jp/bosai/pacifictsunami/data/list.json?_=${Number(new Date())}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA WEPA");
       return r.json();
     }).then((json) => {
       messageToMainWindow({ action: "Return_wepa", data: json });
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "JMA WEPA")
       messageToMainWindow({ action: "Return_wepa", data: [] });
     });
 }
 
 var TremRts_sta;
 var Trem_server = true;
+var TremRts_sta_lastReq = 0;
+/** 未知 StID を検出した際のマスタ再取得の最小間隔 [ms] */
+const TREM_STA_REFETCH_INTERVAL = 60000;
+
+/**
+ * TREM-RTS 観測点マスタを取得し、MainWindow へ座標一覧を配布する（doc/PERF_FIX_DESIGN.md 2.5 章）
+ */
 function Req_TremRts_sta() {
-  fetch(`https://api-${Trem_server ? 1 : 2}.exptech.dev/api/v1/trem/station?_=${Number(new Date())}`)
+  var now = Date.now();
+  //マスタ取得済みなら再取得は 60 秒スロットル、未取得（初回・失敗後）は 5 秒スロットルで再試行
+  var minInterval = TremRts_sta ? TREM_STA_REFETCH_INTERVAL : 5000;
+  if (now - TremRts_sta_lastReq < minInterval) return;
+  TremRts_sta_lastReq = now;
+  var url = `https://api-${Trem_server ? 1 : 2}.exptech.dev/api/v1/trem/station?_=${Number(new Date())}`;
+  debugLog("TREM-RTS station: fetching", url);
+  fetch(url)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "TREM-RTS station");
       return r.json();
     }).then((json) => {
       TremRts_sta = json;
+      var master = [];
+      Object.keys(json).forEach(function (StID) {
+        var info = json[StID]?.info?.[0];
+        if (info && typeof info.lon === "number" && typeof info.lat === "number") {
+          master.push({ Code: StID, lon: info.lon, lat: info.lat });
+        }
+      });
+      TremRtsMaster_Msg = { action: "TREM-RTSMaster", data: master };
+      messageToMainWindow(TremRtsMaster_Msg);
+      debugLog(`TREM-RTS station: ${master.length} stations`);
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "TREM-RTS station")
       UpdateStatus("TREM-RTS", "Error");
       Trem_server = !Trem_server;
     });
 }
 
 var TremRTS_server = true;
-var Trem_URLs = {
-  RT: [//リアルタイム
-    "https://lb-1.exptech.dev/api/v1/trem/rts",
-    "https://lb-2.exptech.dev/api/v1/trem/rts",
-    "https://lb-3.exptech.dev/api/v1/trem/rts",
-    "https://lb-4.exptech.dev/api/v1/trem/rts",
-  ],
-  Hi: [
-    "https://api-1.exptech.dev/api/v1/trem/rts/[UNIXTIME]",
-    "https://api-2.exptech.dev/api/v1/trem/rts/[UNIXTIME]"
-  ]
-}
+var TremRts_Timer;
 function Req_TremRts() {
-  setTimeout(Req_TremRts, config.Source.TREMRTS.Interval);
+  if (TremRts_Timer) clearTimeout(TremRts_Timer);
+  TremRts_Timer = setTimeout(Req_TremRts, config.Source.TREMRTS.Interval);
 
   if (!config.Source.TREMRTS.GetData) return;
   if (!TremRts_sta) Req_TremRts_sta();
@@ -1780,32 +1924,25 @@ function Req_TremRts() {
 
   fetch(url)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "TREM-RTS");
       return r.json();
     }).then((json) => {
+      //毎秒送るのは変化する値のみ: [shindo, pga, r, g, b]（座標等はマスタで 1 回配布済み）
       var TremRtsData = {};
+      var unknownStation = false;
       Object.keys(json.station).forEach(function (StID) {
         var st = json.station[StID];
         var stationData = TremRts_sta ? TremRts_sta[StID] : null;
         if (stationData) {
           var JPShindo = st.i; //おおむね対応するため、現時点では変換不要と判断
           var rgb = KmoniColorTable[Math.min(7, Math.max(-3, Math.floor(JPShindo * 10) / 10))];
-          TremRtsData[StID] = {
-            Type: "TREMRTS",
-            shindo: JPShindo,
-            PGA: st.pga,
-            Code: StID,
-            Name: "",
-            IsSuspended: false,
-            Region: "",
-            Location: {
-              Longitude: stationData.info[0].lon,
-              Latitude: stationData.info[0].lat,
-            },
-            rgb: [rgb.r, rgb.g, rgb.b],
-          };
+          TremRtsData[StID] = [JPShindo, st.pga, rgb.r, rgb.g, rgb.b];
+        } else if (TremRts_sta) {
+          unknownStation = true;
         }
       });
+      //マスタに無い観測点が来た場合はマスタを再取得する（新設観測点への追従。60 秒スロットル）
+      if (unknownStation) Req_TremRts_sta();
       TremRtsData_Marged = {
         action: "TREM-RTSUpdate",
         LocalTime: new Date(),
@@ -1815,7 +1952,7 @@ function Req_TremRts() {
       UpdateStatus("TREM-RTS", "success", new Date(json.time));
 
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "TREM-RTS")
       UpdateStatus("TREM-RTS", "Error");
       TremRTS_server = !TremRTS_server;
     });
@@ -1834,7 +1971,7 @@ var JMATide_sta;
 function Req_JMATide_sta() {
   fetch(`https://www.jma.go.jp/bosai/tidelevel/const/tide_area.json?_=${Number(new Date())}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA tide stations");
       return r.json();
     }).then((json) => {
       var stations = []
@@ -1858,7 +1995,7 @@ function Req_JMATide_sta() {
       JMATide_sta = stations.slice(0, 10)
       //↑近い順10件
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "JMA tide stations")
       messageToMainWindow({ action: "Return_tide", data: [] });
     });
 }
@@ -1872,7 +2009,7 @@ function Req_JMATide() {
     if (!JMATide_astro[st.code]) {
       fetch(`https://www.jma.go.jp/bosai/tidelevel/const/tide_astro/tide_astro_${NormalizeDate("YYYY", new Date() - Replay)}_${st.code}.json`)
         .then((r) => {
-          if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+          ensureOk(r, "JMA tide");
           return r.json();
         }).then((json) => {
           var tide = json.tide;
@@ -1885,14 +2022,14 @@ function Req_JMATide() {
             }
           }
         }).catch((err) => {
-          GeneralError_handler(err)
+          GeneralError_handler(err, "JMA tide")
           messageToMainWindow({ action: "Return_tide", data: [] });
         });
     }
 
     fetch(`https://www.jma.go.jp/bosai/tidelevel/data/tide/tide_obs_${NormalizeDate(2, new Date() - Replay)}_${st.code}.json`)
       .then((r) => {
-        if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+        ensureOk(r, "JMA tide obs");
         return r.json();
       }).then((json) => {
         if (json.tide && json.tide.length >= 4) {
@@ -1927,21 +2064,23 @@ function Req_JMATide() {
           messageToMainWindow({ action: "Return_tide", data: sort_by_dist_TIDE(Object.values(JMATide_obs)) });
         }
       }).catch((err) => {
-        GeneralError_handler(err)
+        GeneralError_handler(err, "JMA tide obs")
         messageToMainWindow({ action: "Return_tide", data: [] });
       });
   })
 }
 
 
+var EarlyEst_Timer;
 function Req_EarlyEst() {
-  setTimeout(Req_EarlyEst, config.Source.EarlyEst.Interval);
+  if (EarlyEst_Timer) clearTimeout(EarlyEst_Timer);
+  EarlyEst_Timer = setTimeout(Req_EarlyEst, config.Source.EarlyEst.Interval);
 
   if (!config.Source.EarlyEst.GetData) return;
 
   fetch("http://early-est.rm.ingv.it/monitor.xml")
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "Early-Est");
       return r.text();
     }).then((text) => {
       UpdateStatus("Early-est", "success");
@@ -1977,7 +2116,7 @@ function Req_EarlyEst() {
         }
       );
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "Early-Est")
       UpdateStatus("Early-est", "Error");
     });
 }
@@ -2022,7 +2161,11 @@ function createWorker() {
           action: "kmoniUpdate",
           timestamp: new Date(message.date),
           LocalTime: new Date(),
-          data: message,
+          shindo: message.shindo,
+          pga: message.pga,
+          valid: message.valid,
+          detectLv: message.detectLv,
+          rgb: kmoniLatestRgb,
         };
         messageToMainWindow(kmoniPointsDataTmp);
         break;
@@ -2031,16 +2174,66 @@ function createWorker() {
   worker.on("error", (error) => {
     throw new Error("地震検知処理でエラーが発生しました。", { cause: error });
   });
+  if (KmoniStationMaster) worker.postMessage({ action: "StationMaster", data: KmoniStationMaster });
 }
 
-//強震モニタリアルタイム揺れ情報処理（地震検知など）
-function ConvertKmoni(data, date) {
-  worker.postMessage({
-    action: "EQDetect",
-    data: data,
-    date: date,
-    detect: config.Info.RealTimeShake.DetectEarthquake,
-  });
+/** 最新の観測点色（worker には渡さないため main が保持し MainWindow へ転送する） */
+var kmoniLatestRgb = null;
+var kmoniUpdateCount = 0;
+var kmoniUpdateLogAt = Date.now();
+
+/**
+ * WorkerWindow から観測点マスタを受信し、worker と MainWindow へ配布する（Issue #19）。
+ * WorkerWindow の reload で再送された場合も同じ経路で再配布する。
+ * @param {Array<object>} master 観測点マスタ
+ */
+function SetKmoniMaster(master) {
+  if (!Array.isArray(master) || master.length === 0) return;
+  KmoniStationMaster = master;
+  kmoniLatestRgb = null;
+  kmoniPointsDataTmp = null;
+  debugLog(`kmoni master received: ${master.length} stations`);
+  if (worker) worker.postMessage({ action: "StationMaster", data: master });
+  messageToMainWindow({ action: "kmoniMaster", data: master });
+}
+
+/**
+ * 強震モニタリアルタイム揺れ情報処理（地震検知など）。
+ * TypedArray を worker へ transfer で移譲する。rgb は worker が使わないため main で保持する。
+ * @param {{shindo:Float32Array, pga:Float32Array, rgb:Uint8Array, valid:Uint8Array, date:number}} response
+ */
+function ConvertKmoni(response) {
+  if (!worker || !KmoniStationMaster) return;
+  var shindo = response.shindo, pga = response.pga, valid = response.valid;
+  if (!(shindo instanceof Float32Array) || !(pga instanceof Float32Array) || !(valid instanceof Uint8Array)) {
+    debugLog("kmoniReturn: unexpected payload types", typeof shindo, typeof pga, typeof valid);
+    return;
+  }
+  if (shindo.length !== KmoniStationMaster.length) {
+    debugLog(`kmoniReturn: length mismatch ${shindo.length} != ${KmoniStationMaster.length}`);
+    return;
+  }
+  kmoniLatestRgb = response.rgb;
+  kmoniUpdateCount++;
+  var now = Date.now();
+  if (now - kmoniUpdateLogAt >= 60000) {
+    var validCount = 0;
+    for (let i = 0; i < valid.length; i++) validCount += valid[i];
+    debugLog(`kmoni pipeline: ${kmoniUpdateCount} updates in last ${Math.round((now - kmoniUpdateLogAt) / 1000)}s, valid points=${validCount}/${valid.length}`);
+    kmoniUpdateLogAt = now;
+    kmoniUpdateCount = 0;
+  }
+  worker.postMessage(
+    {
+      action: "EQDetect",
+      shindo: shindo,
+      pga: pga,
+      valid: valid,
+      date: response.date,
+      detect: config.Info.RealTimeShake.DetectEarthquake,
+    },
+    [shindo.buffer, pga.buffer, valid.buffer]
+  );
 }
 
 //海しるリアルタイム揺れ情報処理
@@ -2069,6 +2262,9 @@ var Kmoni_URLs = [
   `https://www.lmoni.bosai.go.jp/img_svr/data/map_img/RealTimeImg/jma_s/[YYYYMMDD]/[YYYYMMDDhhmmss].jma_s.gif`,
 ];
 
+/** kmoni 404（画像未生成）を表すセンチネル。毎秒の Error 生成を避けるため定数化（Issue #20） */
+const KMONI_NOT_READY = Symbol("kmoni-not-ready");
+
 //強震モニタへのHTTPリクエスト
 function Req_kmoni() {//済
   //タイマー処理
@@ -2084,24 +2280,30 @@ function Req_kmoni() {//済
   fetch(url, {
     signal: AbortSignal.timeout(5000)
   }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+    if (r.status === 404) {
+      //強震モニタは「現在秒の画像が未生成」で 404 を返すのが日常的な挙動。Error オブジェクト生成を避ける
+      throw KMONI_NOT_READY;
+    }
+    ensureOk(r, "kmoni");
     return r.arrayBuffer();
   }).then((buffer) => {
     Kmoni_ErrorCount = 0;
     if (WorkerWindow) {
-      var imgBase64 = Buffer.from(buffer).toString("base64")
+      //ArrayBuffer を構造化クローンで直送する（base64/data URL 変換を廃止。Issue #20）
       WorkerWindow.webContents.send("message2", {
         action: "KmoniImgUpdate",
-        data: `data:image/gif;base64,${imgBase64}`,
+        data: buffer,
         date: ReqTime,
       });
     }
   }).catch((err) => {
-    GeneralError_handler(err)
+    if (err === KMONI_NOT_READY) debugLog("kmoni: image not ready (404)", url);
+    else GeneralError_handler(err, "kmoni")
     Kmoni_ErrorCount++;
     if (Kmoni_ErrorCount > 3) {//エラー回数が溜まったらURLを替える
       Kmoni_ErrorCount = 0;
       Kmoni_URLIndex = (Kmoni_URLIndex + 1) % Kmoni_URLs.length//モニタURLをローリングで選択
+      debugLog("kmoni: switching URL index to", Kmoni_URLIndex);
       SetKmoniOffset(Req_kmoni);
     }
     UpdateStatus("kmoniImg", "Error");
@@ -2122,7 +2324,7 @@ function Req_SNet() {
 
   fetch(`https://www.msil.go.jp/data/tiles/smoni/targetTimes.json?${Number(new Date())}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "msil targetTimes");
       return r.text();
     }).then((text) => {
       var json = JSON.parse(text.replace(/\s+/g, ''));
@@ -2139,23 +2341,22 @@ function Req_SNet() {
         function Req_SNet_core(y, unique_id) {
           fetch(`https://www.msil.go.jp/data/tiles/smoni/tileimage/${basetime}/${basetime}/5/28/${y}.png`)
             .then((r) => {
-              if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+              ensureOk(r, "msil tile");
               return r.arrayBuffer();
             }).then((buffer) => {
               if (WorkerWindow) {
-                var imgBase64 = Buffer.from(buffer).toString("base64");
                 WorkerWindow.webContents.send("message2", {
                   action: "SnetImgUpdate",
                   y: y,
                   unique_id: unique_id,
-                  data: `data:image/png;base64,${imgBase64}`,
+                  data: buffer,
                   date: new Date(),
                 });
               }
               UpdateStatus("msilImg", "success");
 
             }).catch((err) => {
-              GeneralError_handler(err)
+              GeneralError_handler(err, "msil tile")
               UpdateStatus("msilImg", "Error");
             });
         }
@@ -2166,7 +2367,7 @@ function Req_SNet() {
       }
 
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "msil targetTimes")
       UpdateStatus("msilImg", "Error");
     });
 }
@@ -2325,7 +2526,34 @@ function Connect_AXIS() {
 //ProjectBS WebSocket接続・受信処理
 var ProjectBS_Client;
 var ProjectBS_Connection;
-var ProjectBS_Ping_Timer;
+/** WebSocket keepalive タイマー（接続系統名 → intervalId）。close 時に必ず clearWsKeepalive する（Issue #25） */
+var WS_KeepaliveTimers = {};
+
+/**
+ * WebSocket の keepalive ping タイマーを（再）設定する。既存タイマーは必ず解除する。
+ * @param {string} key 接続系統名
+ * @param {import("websocket").connection} connection 接続
+ * @param {number} intervalMs ping 間隔 [ms]
+ */
+function armWsKeepalive(key, connection, intervalMs) {
+  clearWsKeepalive(key);
+  WS_KeepaliveTimers[key] = setInterval(function () {
+    if (connection.connected) connection.sendUTF("ping");
+    else clearWsKeepalive(key);
+  }, intervalMs);
+}
+
+/**
+ * keepalive タイマーを解除する
+ * @param {string} key 接続系統名
+ */
+function clearWsKeepalive(key) {
+  if (WS_KeepaliveTimers[key]) {
+    clearInterval(WS_KeepaliveTimers[key]);
+    WS_KeepaliveTimers[key] = null;
+  }
+}
+
 function ProjectBS() {
   if (!config.Source.ProjectBS.GetData) return;
   ProjectBS_Client = new WebSocketClient();
@@ -2337,10 +2565,14 @@ function ProjectBS() {
 
   ProjectBS_Client.on("connect", function (connection) {
     ProjectBS_Connection = connection;
-    connection.on("error", function () {
+    debugLog("WS ProjectBS: connected");
+    connection.on("error", function (err) {
+      debugLog("WS ProjectBS: error", err?.message);
       UpdateStatus("ProjectBS", "Error");
     });
-    connection.on("close", function () {
+    connection.on("close", function (code, desc) {
+      debugLog("WS ProjectBS: closed", code, desc);
+      clearWsKeepalive("ProjectBS");
       UpdateStatus("ProjectBS", "Disconnect");
       TryConnect_ProjectBS();
     });
@@ -2357,13 +2589,7 @@ function ProjectBS() {
     connection.sendUTF("queryjson");
 
     UpdateStatus("ProjectBS", "success");
-    if (ProjectBS_Ping_Timer) {
-      clearInterval(ProjectBS_Ping_Timer);
-      ProjectBS_Ping_Timer = null;
-    }
-    ProjectBS_Ping_Timer = setInterval(function () {
-      connection.sendUTF("ping");
-    }, 1200000);
+    armWsKeepalive("ProjectBS", connection, 1200000);
   });
 
   Connect_ProjectBS();
@@ -2371,6 +2597,7 @@ function ProjectBS() {
 var ProjectBS_ConnectedDate = new Date();
 function TryConnect_ProjectBS() {
   var timeout = Math.max(30000 - (new Date() - ProjectBS_ConnectedDate), 100);
+  debugLog(`WS ProjectBS: reconnect in ${timeout}ms`);
   setTimeout(Connect_ProjectBS, timeout);
 }
 function Connect_ProjectBS() {
@@ -2381,7 +2608,6 @@ function Connect_ProjectBS() {
 //Wolfx WebSocket接続・受信処理
 var WolfxWS_Client;
 var WolfxConnection;
-var Wolfx_Timer;
 function WolfxWS() {
   if (!config.Source.wolfx.GetData) return;
   WolfxWS_Client = new WebSocketClient();
@@ -2393,10 +2619,14 @@ function WolfxWS() {
 
   WolfxWS_Client.on("connect", function (connection) {
     WolfxConnection = connection;
-    connection.on("error", function () {
+    debugLog("WS wolfx: connected");
+    connection.on("error", function (err) {
+      debugLog("WS wolfx: error", err?.message);
       UpdateStatus("wolfx", "Error");
     });
-    connection.on("close", function () {
+    connection.on("close", function (code, desc) {
+      debugLog("WS wolfx: closed", code, desc);
+      clearWsKeepalive("wolfx");
       UpdateStatus("wolfx", "Disconnect");
       TryConnect_WolfxWS();
     });
@@ -2415,16 +2645,12 @@ function WolfxWS() {
       } catch {
         UpdateStatus("wolfx", "Error");
       }
-      if (Wolfx_Timer) {
-        clearInterval(Wolfx_Timer)
-        Wolfx_Timer = null;
-      }
-      Wolfx_Timer = setInterval(function () {
-        connection.sendUTF("ping");
-      }, 60000);
+      //無通信 60 秒で ping を送る（受信ごとにタイマーを延長する idle-keepalive）
+      armWsKeepalive("wolfx", connection, 60000);
     });
     connection.sendUTF("query_jmaeew");
     UpdateStatus("wolfx", "success");
+    armWsKeepalive("wolfx", connection, 60000);
   });
 
   Connect_WolfxWS();
@@ -2432,6 +2658,7 @@ function WolfxWS() {
 var Wolfx_ConnectedDate = new Date();
 function TryConnect_WolfxWS() {
   var timeoutTmp = Math.max(30000 - (new Date() - Wolfx_ConnectedDate), 100);
+  debugLog(`WS wolfx: reconnect in ${timeoutTmp}ms`);
   setTimeout(Connect_WolfxWS, timeoutTmp);
 }
 function Connect_WolfxWS() {
@@ -2441,7 +2668,6 @@ function Connect_WolfxWS() {
 
 //Seisjs WebSocket接続・受信処理
 var SeisjsWS_Client;
-var SeisjsWS_timer;
 function SeisjsWS() {
   if (!config.Source.wolfx.GetDataFromSeisJS) return;
   SeisjsWS_Client = new WebSocketClient();
@@ -2452,10 +2678,14 @@ function SeisjsWS() {
   });
 
   SeisjsWS_Client.on("connect", function (SeisjsConnection) {
-    SeisjsConnection.on("error", function () {
+    debugLog("WS SeisJS: connected");
+    SeisjsConnection.on("error", function (err) {
+      debugLog("WS SeisJS: error", err?.message);
       UpdateStatus("wolfx", "Error");
     });
-    SeisjsConnection.on("close", function () {
+    SeisjsConnection.on("close", function (code, desc) {
+      debugLog("WS SeisJS: closed", code, desc);
+      clearWsKeepalive("SeisJS");
       UpdateStatus("wolfx", "Disconnect");
       TryConnect_SeisjsWS();
     });
@@ -2469,15 +2699,10 @@ function SeisjsWS() {
       } catch {
         UpdateStatus("wolfx", "Error");
       }
-      if (SeisjsWS_timer) {
-        clearInterval(SeisjsWS_timer);
-        SeisjsWS_timer = null;
-      }
-      SeisjsWS_timer = setInterval(function () {
-        SeisjsConnection.sendUTF("ping");
-      }, 60000);
+      armWsKeepalive("SeisJS", SeisjsConnection, 60000);
     });
     UpdateStatus("wolfx", "success");
+    armWsKeepalive("SeisJS", SeisjsConnection, 60000);
   });
 
   Connect_SeisjsWS();
@@ -2485,6 +2710,7 @@ function SeisjsWS() {
 var Seisjs_ConnectedDate = new Date();
 function TryConnect_SeisjsWS() {
   var timeoutTmp = Math.max(30000 - (new Date() - Seisjs_ConnectedDate), 100);
+  debugLog(`WS SeisJS: reconnect in ${timeoutTmp}ms`);
   setTimeout(Connect_SeisjsWS, timeoutTmp);
 }
 function Connect_SeisjsWS() {
@@ -2542,6 +2768,7 @@ function IntervalRun(msec, func) {
 }
 
 //定期実行
+var RegularExecution_Timer;
 function RegularExecution(loop) {
   try {
     //EEW解除
@@ -2562,7 +2789,8 @@ function RegularExecution(loop) {
     }
 
     if (loop) {
-      setTimeout(function () {
+      if (RegularExecution_Timer) clearTimeout(RegularExecution_Timer);
+      RegularExecution_Timer = setTimeout(function () {
         RegularExecution(true);
       }, 1000);
     }
@@ -2586,14 +2814,14 @@ async function SetKmoniOffset(func) {
 
         fetch(`http://www.kmoni.bosai.go.jp/webservice/server/pros/latest.json?_=${Number(new Date())}`)
           .then((r) => {
-            if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+            ensureOk(r, "kmoni latest.json");
             return r.json();
           }).then((json) => {
             var resTime = new Date(json.latest_time);
             if (Number(resTimeTmp) !== Number(resTime)) KmoniOffset = new Date() - resTime - (new Date() - reqTime) / 2;
             resTimeTmp = resTime;
           }).catch((err) => {
-            GeneralError_handler(err)
+            GeneralError_handler(err, "kmoni latest.json")
             UpdateStatus("kmoniImg", "Error");
           });
 
@@ -2607,7 +2835,7 @@ async function SetKmoniOffset(func) {
     KmoniOffset += 200;
   } catch (err) {
     KmoniOffset = 2500;
-    GeneralError_handler(err)
+    GeneralError_handler(err, "kmoni latest.json")
   }
   if (func) setTimeout(func, 200);
 }
@@ -2624,6 +2852,7 @@ function UpdateStatus(type, condition, timeStamp) {
     condition: condition,
   });
 
+  if (kmoniTimeTmp[type]?.condition !== condition) debugLog(`status ${type}: ${kmoniTimeTmp[type]?.condition ?? "(none)"} -> ${condition}`);
   kmoniTimeTmp[type] = {
     type: type,
     timestamp: timeStamp,
@@ -3063,6 +3292,7 @@ function EEW_Marge(data) {
         if (data.serial > MaxSerial) {
           //最新の報である
           SameEEW.data.push(data);//データ追加
+          truncateOldest(SameEEW.data, RETENTION_LIMITS.EEWStorageData);
           if (data.is_cancel) SameEEW.cancelled = true;
           EEW_Alert(data); //警報処理
         }
@@ -3077,6 +3307,7 @@ function EEW_Marge(data) {
         simulation: data.source == "simulation",
         data: [data],
       });
+      truncateOldest(EEW_Storage, RETENTION_LIMITS.EEWStorage);
 
       EEW_Alert(data); //警報処理
     }
@@ -3130,6 +3361,7 @@ function EarlyEst_Marge(data) {
           //第２報以降
           EarlyEst_Alert(data, false);
           SameEEW.data.push(data);
+          truncateOldest(SameEEW.data, RETENTION_LIMITS.EEWStorageData);
           if (data.is_cancel) {
             SameEEW.cancelled = true;
           }
@@ -3143,6 +3375,7 @@ function EarlyEst_Marge(data) {
         cancelled: false,
         data: [data],
       });
+      truncateOldest(EarlyEst_Data, RETENTION_LIMITS.EarlyEst);
     }
   } catch (err) {
     throw new Error("Early-Est データの処理（マージ）に失敗しました。", { cause: err });
@@ -3331,7 +3564,7 @@ function Req_JMAXMLList(count, longFeed) {
   var url = `https://www.data.jma.go.jp/developer/xml/feed/${longFeed ? "eqvol_l.xml" : "eqvol.xml"}`
   fetch(url)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA XML feed");
       return r.text();
     }).then((text) => {
       const xml = DomPsr.parseFromString(text, "text/xml");
@@ -3388,7 +3621,7 @@ function Req_JMAXMLList(count, longFeed) {
 
       UpdateStatus("JMAXML", "success");
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "JMA XML feed")
       UpdateStatus("JMAXML", "Error");
     });
 }
@@ -3396,7 +3629,7 @@ function Req_JMAXMLList(count, longFeed) {
 function Req_JMAJSONList() {
   fetch("https://www.jma.go.jp/bosai/quake/data/list.json")
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA JSON list");
       return r.json();
     }).then((json) => {
       var HokkaidoSanrikuURL = json.find(function (el) {
@@ -3404,14 +3637,14 @@ function Req_JMAJSONList() {
       })
       if (HokkaidoSanrikuURL) Req_Hokkaidosanriku_JSON(`https://www.jma.go.jp/bosai/quake/data/${HokkaidoSanrikuURL.json}`)
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "JMA JSON list")
     });
 }
 
 function Req_Hokkaidosanriku_JSON(url) {
   fetch(url)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA Hokkaido-Sanriku");
       return r.json();
     }).then((json) => {
       var data = {
@@ -3431,7 +3664,7 @@ function Req_Hokkaidosanriku_JSON(url) {
 
       Process_Hokkaidosanriku(data)
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "JMA Hokkaido-Sanriku")
     });
 }
 
@@ -3442,6 +3675,7 @@ function Process_Hokkaidosanriku(data) {
   HokkaidoSanrikuInfoAll.push(data);
   HokkaidoSanrikuInfoAll = HokkaidoSanrikuInfoAll
     .sort((a, b) => a.reportDate > b.reportDate ? -1 : 1);
+  HokkaidoSanrikuInfoAll.splice(RETENTION_LIMITS.InfoAll);
 
   messageToMainWindow({
     action: "HokkaidoSanrikuInfo",
@@ -3457,11 +3691,11 @@ function Process_Hokkaidosanriku(data) {
 
 //気象庁XML 取得・フォーマット変更→MargeEQInfo
 function Req_JMAXML(url, count) {
-  if (!url || jmaXML_Fetched.includes(url)) return;
+  if (!url || jmaXML_Fetched.has(url)) return;
 
   fetch(url)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA XML");
       return r.text();
     }).then((text) => {
       const xml = DomPsr.parseFromString(text, "text/xml");
@@ -3622,6 +3856,7 @@ function Req_JMAXML(url, count) {
         NankaiTroughInfoAll.push(data);
         NankaiTroughInfoAll = NankaiTroughInfoAll
           .sort((a, b) => a.reportDate > b.reportDate ? -1 : 1);
+        NankaiTroughInfoAll.splice(RETENTION_LIMITS.InfoAll);
 
         var teirei;
         var rinji = NankaiTroughInfoAll.find(function (elm) {
@@ -4007,6 +4242,7 @@ function Req_JMAXML(url, count) {
         KatsudoJokyoInfoAll.push(data);
         KatsudoJokyoInfoAll = KatsudoJokyoInfoAll
           .sort((a, b) => a.reportDate > b.reportDate ? -1 : 1);
+        KatsudoJokyoInfoAll.splice(RETENTION_LIMITS.InfoAll);
 
         messageToMainWindow({
           action: "KatsudoJokyoInfo",
@@ -4024,10 +4260,11 @@ function Req_JMAXML(url, count) {
       UpdateStatus("JMAXML", "success");
       if (new Date(xml.getElementsByTagName("ReportDateTime")[0].textContent) < (new Date() - Replay)) {
         //未来のデータ（リプレイ時）のため無視した場合、取得済みリストに入れない
-        jmaXML_Fetched.push(url);
+        jmaXML_Fetched.add(url);
+        if (jmaXML_Fetched.size > RETENTION_LIMITS.jmaXMLFetched) jmaXML_Fetched.delete(jmaXML_Fetched.values().next().value); //最古（挿入順）を削除
       }
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "JMA XML")
       UpdateStatus("JMAXML", "Error");
     });
 }
@@ -4042,7 +4279,7 @@ var usgsLastGenerated = 0;
 var Req_USGS = throttle(function () {
   fetch(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=${USGS_CurrentInfoNumber}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "USGS");
       return r.json();
     }).then((json) => {
       var LastGenTmp = Number(json?.features?.[0]?.properties?.updated || new Date());
@@ -4074,7 +4311,7 @@ var Req_USGS = throttle(function () {
       dataTmp2 = dataTmp2.sort((a, b) => a.OriginTime > b.OriginTime ? -1 : 1);
       AlertEQInfo(dataTmp2, "usgs");
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "USGS")
     });
 }, 2000);
 
@@ -4082,7 +4319,7 @@ var Req_USGS = throttle(function () {
 function Req_NarikakunList(count) {
   fetch(`https://earthquake-api-v2.nakn.jp/api/v2/list?limit=${JMA_CurrentInfoNumber}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "ntool");
       return r.json();
     }).then((json) => {
       if (!json || json.status != "ok" || !json.items) throw new Error("ntools APIが不正なデータかstatus≠okを返した。");
@@ -4122,7 +4359,7 @@ function Req_NarikakunList(count) {
 
       UpdateStatus("ntool", "success");
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "ntool")
       UpdateStatus("ntool", "Error");
     });
 }
@@ -4156,6 +4393,8 @@ function MargeEQInfo(dataList, count) {
           axisData: [],
         };
         EQElm.raw_data.push(data);
+        //同一イベントの報数は上限で刈り込む（古い順。Issue #24）
+        pruneArrayByCount(EQElm.raw_data, RETENTION_LIMITS.EQInfoRawData, function (e) { return Number(e.reportDateTime) || 0; });
         var rawData = EQElm.raw_data
           .sort((a, b) => a.reportDateTime < b.reportDateTime ? -1 : 1);
 
@@ -4260,12 +4499,16 @@ function MargeEQInfo(dataList, count) {
 
         eqInfoTmp.push(data);
         eqInfo.jma.push(data);
-        var latest_reportDate = Math.max(...Object.keys(EQInfoData).map(function (key) { return Number(EQInfoData[key].reportDateTime) }));
+        //最新 reportDateTime は追加時にインクリメンタル更新する（全キー走査のスプレッド展開を廃止。Issue #24）
+        var reportDateNum = Number(data.reportDateTime) || 0;
+        if (reportDateNum > EQInfo_latestReportDate) EQInfo_latestReportDate = reportDateNum;
 
         //当該イベントの初受信＆それが最新（reportDateが過去最大）なら音声通知する
-        data.audioNotification = (count !== 0 && data.category !== "EEW" && Number(data.reportDateTime) == latest_reportDate)
+        data.audioNotification = (count !== 0 && data.category !== "EEW" && reportDateNum == EQInfo_latestReportDate)
       }
     });
+
+    pruneEQInfo();
 
     if (eqInfoTmp.length > 0) AlertEQInfo(eqInfoTmp, "jma", false);
     if (UpdateEQInfoTmp.length > 0) AlertEQInfo(UpdateEQInfoTmp, "jma", true);
@@ -4274,10 +4517,25 @@ function MargeEQInfo(dataList, count) {
   }
 }
 
+/** EQInfoData に登録済みの最大 reportDateTime（音声通知の「最新判定」用） */
+var EQInfo_latestReportDate = 0;
+
+/**
+ * 地震情報の保持件数を上限以下に刈り込む（Issue #24）。
+ * EQInfoData は reportDateTime の古い順、eqInfo.jma は表示件数の 2 倍（最低 RETENTION_LIMITS.eqInfoJmaMin）を保護する。
+ */
+function pruneEQInfo() {
+  var removed = pruneObjectByCount(EQInfoData, RETENTION_LIMITS.EQInfoData, function (e) { return Number(e.reportDateTime) || 0; });
+  var jmaLimit = Math.max(JMA_CurrentInfoNumber * 2, RETENTION_LIMITS.eqInfoJmaMin);
+  removed += pruneArrayByCount(eqInfo.jma, jmaLimit, function (e) { return Number(e.DateForSort ?? e.reportDateTime) || 0; });
+  if (removed) debugLog(`EQInfo pruned: ${removed} items (EQInfoData=${Object.keys(EQInfoData).length}, eqInfo.jma=${eqInfo.jma.length})`);
+}
+
 
 var EQCount_data = {};
 function EQCount_process(data) {
   if (data) EQCount_data[data.eventId] = data
+  pruneObjectByCount(EQCount_data, RETENTION_LIMITS.EQCount, function (e) { return Number(e.reportDateTime) || 0; });
   var EQCount_data_array = Object.values(EQCount_data);
 
   EQCount_data_array = EQCount_data_array
@@ -4433,6 +4691,7 @@ function ConvertTsunamiInfo(data) {
       });
     } else {
       Tsunami_Data.push(data);
+      truncateOldest(Tsunami_Data, RETENTION_LIMITS.Tsunami);
 
       //アラートするかどうかの判定
 

@@ -4,12 +4,9 @@ var Tsunami_MajorWarning, Tsunami_Warning, Tsunami_Watch, Tsunami_Yoho;
 
 var psWaveList = [];
 var tsunamiAlertNow = false;
-var hinanjoLayers = [];
-var knet_already_draw = false;
 var current_EEW = [];
 var Replay = 0;
 var background = false;
-var knetMapData;
 var snetMapData;
 var userPosition = [138.46, 32.99125];
 var userZoom = 4;
@@ -17,9 +14,31 @@ var userMotionFlg;
 
 var high_contrast = window.matchMedia("(forced-colors: active)").matches;
 
-document.body.addEventListener("mouseover", function () {
-  background = false;
+/**
+ * ウィンドウの可視状態変化を background 判定に反映する（Issue #21）。
+ * 最小化・（プラットフォームが対応する場合）完全遮蔽で document.hidden が true になる。
+ * 復帰時は activate と同じ再描画を行う。
+ */
+document.addEventListener("visibilitychange", function () {
+  if (document.hidden) {
+    background = true;
+  } else if (background) {
+    activateWindow();
+  }
 });
+
+/**
+ * 前面復帰時の処理。background を解除し、バックグラウンド中にスキップした描画を最新値で復元する。
+ */
+function activateWindow() {
+  background = false;
+  kmoniForceAll = true;
+  if (kmoniLatest) kmoniApplyUpdate(kmoniLatest);
+  if (snetMapData) kmoniMapUpdate(snetMapData, "snet");
+  if (TREMRTS_TMP) TREMRTSUpdate(TREMRTS_TMP);
+  if (SeisJS_TMP) SeisJSUpdate(SeisJS_TMP);
+  if (current_EEW.length > 0) psWaveAnmStart();
+}
 var tsunamiStations = [];
 
 fetch("./Resource/TsunamiStations.json")
@@ -34,11 +53,7 @@ window.electronAPI.messageSend((event, request) => {
   if (request.action == "init") {
     init();
   } else if (request.action == "activate") {
-    background = false;
-    if (knetMapData) kmoniMapUpdate(knetMapData, "knet");
-    if (snetMapData) kmoniMapUpdate(snetMapData, "snet");
-    if (TREMRTS_TMP) TREMRTSUpdate(TREMRTS_TMP);
-    if (SeisJS_TMP) SeisJSUpdate(SeisJS_TMP);
+    activateWindow();
   } else if (request.action == "deactivate") {
     background = true;
   } else if (request.action == "EEW_AlertUpdate") {
@@ -47,12 +62,16 @@ window.electronAPI.messageSend((event, request) => {
     JMAEstShindoControl(request.data);
   } else if (request.action == "UpdateStatus") {
     UpdateStatus(request.timestamp, request.LocalTime, request.type, request.condition);
+  } else if (request.action == "kmoniMaster") {
+    kmoniSetMaster(request.data);
   } else if (request.action == "kmoniUpdate") {
     UpdateStatus(request.timestamp, request.LocalTime, "kmoniImg", "success");
-    if (!background || !knet_already_draw) kmoniMapUpdate(request.data, "knet");
+    kmoniApplyUpdate(request);
   } else if (request.action == "SnetUpdate") {
     UpdateStatus(request.timestamp, request.LocalTime, "msilImg", "success");
     kmoniMapUpdate(request.data, "snet");
+  } else if (request.action == "TREM-RTSMaster") {
+    TREMRTSSetMaster(request.data);
   } else if (request.action == "TREM-RTSUpdate") {
     TREMRTS_TMP = request.data;
     TREMRTSUpdate(request.data);
@@ -66,9 +85,10 @@ window.electronAPI.messageSend((event, request) => {
     var geojson = { type: "FeatureCollection", features: [] };
     if (map) {
       map.getSource("SEISJS_points").setData(geojson);
-      map.getSource("TREMRTS_points").setData(geojson);
       map.getSource("snet_points").setData(geojson);
-      map.getSource("knet_points").setData(geojson);
+      //knet/TREM は Feature 集合が不変のため state のみクリアし、次回更新で全点を再送する
+      kmoniResetState();
+      TREMRTSResetState();
     }
     psWaveEntry();
   } else if (request.action == "EQInfo") eqInfoDraw(request.data, request.source);
@@ -107,10 +127,11 @@ window.addEventListener("load", () => {
       document.getElementById("kmoni_Message").innerHTML = json.message;
     });
 
-  psWaveAnm(); //予報円描画着火
+  psWaveAnmStart(); //予報円描画着火（EEW が無ければ即停止する）
   setInterval(function () {
-    //時計（ローカル時刻）更新
-    if (UTDialogShow && !background)
+    //時計（ローカル時刻）更新。バックグラウンド中は DOM を触らない（Issue #23）
+    if (background) return;
+    if (UTDialogShow)
       document.getElementById("PC_TIME").textContent = NormalizeDate(3, new Date() - Replay);
     document.getElementById("all_UpdateTime").textContent = NormalizeDate(3, new Date() - Replay);
   }, 500);
@@ -768,13 +789,33 @@ document.getElementById("CloseTsunamiRevocation").addEventListener("click", func
 });
 
 var AnmTimer;
+var psWaveAnmRunning = false;
+
+/**
+ * 予報円アニメーションを開始する（既に動作中なら何もしない）。
+ * EEW 受信時（psWaveEntry）と前面復帰時に呼ぶ。Issue #23
+ */
+function psWaveAnmStart() {
+  if (psWaveAnmRunning) return;
+  psWaveAnmRunning = true;
+  psWaveAnm();
+}
+
+/**
+ * 予報円アニメーションの 1 ティック。対象 EEW が無くなったらループを停止する。
+ */
 function psWaveAnm() {
-  for (var elm of current_EEW) {
-    if (!elm.is_cancel) {
-      psWaveCalc(elm.EventID);
-    }
-  }
   if (AnmTimer) clearTimeout(AnmTimer)
+  AnmTimer = null;
+
+  var active = current_EEW.filter(function (elm) { return !elm.is_cancel; });
+  if (active.length === 0) {
+    psWaveAnmRunning = false;
+    return;
+  }
+  for (var elm of active) {
+    psWaveCalc(elm.EventID);
+  }
 
   if (background) {
     AnmTimer = setTimeout(psWaveAnm, 1000);
@@ -836,9 +877,9 @@ function overlaySelect(layerName, checked) {
   }
   if (layerName == "hinanjo") {
     map.setLayoutProperty("hinanjo", "visibility", checked ? "visible" : "none");
-    hinanjoLayers.forEach(function (elm) {
-      if (map.getLayer(elm)) {
-        map.setLayoutProperty(elm, "visibility", checked ? "visible" : "none");
+    HINANJO_LAYERS.forEach(function (def) {
+      if (map.getLayer(def.id)) {
+        map.setLayoutProperty(def.id, "visibility", checked ? "visible" : "none");
       }
     });
   } else {
@@ -1458,17 +1499,8 @@ function init() {
           layout: {
             visibility: config.data.kmoni_points_show ? "visible" : "none",
           },
-          paint: {
-            "circle-color": [
-              "rgb",
-              ["at", 0, ["get", "rgb"]],
-              ["at", 1, ["get", "rgb"]],
-              ["at", 2, ["get", "rgb"]],
-            ],
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 1, 5, 3.75, 15, 33.75,],
-            "circle-stroke-width": 2,
-            "circle-stroke-color": ["match", ["get", "detectLv"], 0, "transparent", 1, "#cb732b", 2, "#cb2b2b", "#0000",],
-          },
+          //色・可視・検知枠は feature-state で毎秒更新する（Feature 集合は起動時に 1 回だけ構築。Issue #18）
+          paint: KMONI_FEATURE_STATE_PAINT(true),
         },
         {
           id: "snet_points",
@@ -1494,15 +1526,7 @@ function init() {
           layout: {
             visibility: config.data.kmoni_points_show ? "visible" : "none",
           },
-          paint: {
-            "circle-color": [
-              "rgb",
-              ["at", 0, ["get", "rgb"]],
-              ["at", 1, ["get", "rgb"]],
-              ["at", 2, ["get", "rgb"]],
-            ],
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 1, 5, 3.75, 15, 33.75,],
-          },
+          paint: KMONI_FEATURE_STATE_PAINT(false),
         },
         {
           id: "SEISJS_points",
@@ -1539,107 +1563,56 @@ function init() {
   map.on("click", "prefmap_fill", function (e) {
     e.originalEvent.cancelBubble = true;
   });
-  var nied_popup = function (e) {
-    var elm = e.features[0].properties;
-    if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) return;
-    var popupContent = generatePopupContent_K(elm);
-    if (kmoni_popup[elm.Code]) {
-      kmoni_popup[elm.Code].setHTML(popupContent).addTo(map);
+  /**
+   * 観測点ポップアップを開く（既存なら再表示）。close 時にキャッシュから削除する（Issue #23）
+   * @param {string} code 観測点コード
+   * @param {[number, number]} lngLat 座標
+   * @param {string} html 内容
+   */
+  function openPointPopup(code, lngLat, html) {
+    if (kmoni_popup[code] && kmoni_popup[code].isOpen()) return;
+    if (kmoni_popup[code]) {
+      kmoni_popup[code].setHTML(html).addTo(map);
     } else {
-      kmoni_popup[elm.Code] = new maplibregl.Popup()
-        .setLngLat(e.features[0].geometry.coordinates)
-        .setHTML(popupContent)
-        .addTo(map);
+      var popup = new maplibregl.Popup().setLngLat(lngLat).setHTML(html).addTo(map);
+      popup.on("close", function () {
+        if (kmoni_popup[code] === popup) delete kmoni_popup[code];
+      });
+      kmoni_popup[code] = popup;
     }
+  }
+
+  map.on("click", "knet_points", function (e) {
+    var f = e.features[0];
+    var params = kmoniPointParams(f.id);
+    if (!params || !params.data) return; //不可視（valid=0）の点は無視
+    openPointPopup(params.Code, f.geometry.coordinates, generatePopupContent_K(params));
     e.originalEvent.cancelBubble = true;
-  };
-  map.on("click", "knet_points", nied_popup);
-  map.on("click", "snet_points", nied_popup);
-  map.on("click", "TREMRTS_points", function (e) {
+  });
+  map.on("click", "snet_points", function (e) {
     var elm = e.features[0].properties;
-    if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) return;
-    var popupContent = generatePopupContent_TREM(elm);
-    if (kmoni_popup[elm.Code]) {
-      kmoni_popup[elm.Code].setHTML(popupContent).addTo(map);
-    } else {
-      kmoni_popup[elm.Code] = new maplibregl.Popup()
-        .setLngLat(e.features[0].geometry.coordinates)
-        .setHTML(popupContent)
-        .addTo(map);
-    }
+    openPointPopup(elm.Code, e.features[0].geometry.coordinates, generatePopupContent_K(elm));
+    e.originalEvent.cancelBubble = true;
+  });
+  map.on("click", "TREMRTS_points", function (e) {
+    var f = e.features[0];
+    var params = TREMRTSPointParams(f.id);
+    if (!params) return; //未報告（valid=0）の点は無視
+    openPointPopup(params.Code, f.geometry.coordinates, generatePopupContent_TREM(params));
     e.originalEvent.cancelBubble = true;
   });
   map.on("click", "SEISJS_points", function (e) {
     var elm = e.features[0].properties;
-    if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) return;
-    var popupContent = generatePopupContent_SEISJS(elm);
-    if (kmoni_popup[elm.Code]) {
-      kmoni_popup[elm.Code].setHTML(popupContent).addTo(map);
-    } else {
-      kmoni_popup[elm.Code] = new maplibregl.Popup()
-        .setLngLat(e.features[0].geometry.coordinates)
-        .setHTML(popupContent)
-        .addTo(map);
-    }
+    openPointPopup(elm.Code, e.features[0].geometry.coordinates, generatePopupContent_SEISJS(elm));
     e.originalEvent.cancelBubble = true;
   });
 
+  //避難所オーバーレイ: 固定 2 source + 2 layer に統合し、タイル毎の source/layer/listener 増殖を防ぐ（Issue #22）
+  //source/layer の追加はスタイル読込後（map.on("load") 内）で行う
   map.on("sourcedataloading", (e) => {
-    var hinanjoCheck = config.data.overlay.includes("hinanjo");
     if (!map) return;
-    if (e.sourceId == "hinanjo" && hinanjoCheck && e.tile != undefined) {
-      var ca = e.tile.tileID.canonical;
-      var eq_name = `hinanjo_eq_${ca.x}${ca.y}${ca.z}`;
-      var ts_name = `hinanjo_ts_${ca.x}${ca.y}${ca.z}`;
-
-      if (map.getLayer(eq_name)) map.removeLayer(eq_name);
-      if (map.getSource(eq_name)) map.removeSource(eq_name);
-      if (map.getLayer(ts_name)) map.removeLayer(ts_name);
-      if (map.getSource(ts_name)) map.removeSource(ts_name);
-
-      map.addSource(eq_name, {
-        type: "geojson",
-        data: `https://cyberjapandata.gsi.go.jp/xyz/skhb04/${ca.z}/${ca.x}/${ca.y}.geojson`,
-      });
-
-      map.addLayer({
-        id: eq_name,
-        type: "circle",
-        source: eq_name,
-        layout: { visibility: hinanjoCheck ? "visible" : "none" },
-        paint: {
-          "circle-color": "#bf8715",
-          "circle-radius": 6,
-          "circle-stroke-width": 1,
-          "circle-stroke-color": "#222",
-        },
-        minzoom: 10,
-        maxzoom: 22,
-      });
-
-      map.addSource(ts_name, {
-        type: "geojson",
-        data: `https://cyberjapandata.gsi.go.jp/xyz/skhb05/${ca.z}/${ca.x}/${ca.y}.geojson`,
-      });
-
-      map.addLayer({
-        id: ts_name,
-        type: "circle",
-        source: ts_name,
-        layout: { visibility: hinanjoCheck ? "visible" : "none" },
-        paint: {
-          "circle-color": "#2488c7",
-          "circle-radius": 6,
-          "circle-stroke-width": 1,
-          "circle-stroke-color": "#222",
-        },
-        minzoom: 10,
-        maxzoom: 22,
-      });
-
-      map.on("click", eq_name, hinanjoPopup);
-      map.on("click", ts_name, hinanjoPopup);
-      hinanjoLayers.push(eq_name, ts_name);
+    if (e.sourceId == "hinanjo" && config.data.overlay.includes("hinanjo") && e.tile != undefined) {
+      hinanjoLoadTile(e.tile.tileID.canonical);
     }
   });
 
@@ -1764,6 +1737,7 @@ function init() {
   };
   zoomLevelContinue();
   map.on("load", async () => {
+    hinanjoInitLayers();
     var image = await map.loadImage("./img/AlertOverlay.png");
     map.addImage("pattern", image.data);
     map.addLayer(
@@ -1850,71 +1824,186 @@ function map_gethome() {
 
 //観測点情報更新
 var kmoni_popup = {};
-function kmoniMapUpdate(dataTmp, type) {
-  if (!dataTmp.data || background) return;
-  var geojson = { type: "FeatureCollection", features: [] };
 
-  if (type == "knet") {
-    knetMapData = dataTmp;
-    dataTmp.data.forEach(function (elm) {
-      if (elm.data) {
-        geojson.features.push({
-          type: "Feature",
-          properties: {
-            Code: elm.Code,
-            IsSuspended: elm.IsSuspended,
-            Name: elm.Name,
-            Region: elm.Region,
-            Type: elm.Type,
-            checked: elm.checked,
-            data: elm.data,
-            detect: elm.detect,
-            detect2: elm.detect2,
-            detectLv: elm.detect2 ? 2 : elm.detect ? 1 : 0,
-            pga: elm.pga,
-            rgb: elm.rgb,
-            shindo: elm.shindo,
-          },
-          geometry: {
-            type: "Point",
-            coordinates: [elm.Location.Longitude, elm.Location.Latitude],
-          },
-        });
-      }
-      if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) {
-        kmoni_popup[elm.Code].setHTML(generatePopupContent_K(elm));
-      }
-    });
-    if (map) map.getSource("knet_points")?.setData(geojson);
-
-    return;
-  } else {
-    snetMapData = dataTmp;
-
-    dataTmp.data.forEach(function (elm) {
-      if (elm.data) {
-        geojson.features.push({
-          type: "Feature",
-          properties: {
-            Code: elm.Code,
-            Type: elm.Type,
-            data: elm.data,
-            pga: elm.pga,
-            rgb: elm.rgb,
-            shindo: elm.shindo,
-          },
-          geometry: {
-            type: "Point",
-            coordinates: [elm.Location.Longitude, elm.Location.Latitude],
-          },
-        });
-      }
-      if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) {
-        kmoni_popup[elm.Code].setHTML(generatePopupContent_K(elm));
-      }
-    });
-    if (map) map.getSource("snet_points").setData(geojson);
+/**
+ * feature-state ベースの観測点レイヤ paint 定義（Issue #18）。
+ * 値未設定（state 未投入）の点は coalesce で 0 に落とし、valid=0 の点は透明にする。
+ * @param {boolean} withDetectStroke 検知レベルの枠線を描くか（K-NET のみ）
+ * @returns {object} paint 定義
+ */
+function KMONI_FEATURE_STATE_PAINT(withDetectStroke) {
+  var visible = ["case", ["==", ["coalesce", ["feature-state", "valid"], 0], 1], 1, 0];
+  var paint = {
+    "circle-color": [
+      "rgb",
+      ["coalesce", ["feature-state", "r"], 0],
+      ["coalesce", ["feature-state", "g"], 0],
+      ["coalesce", ["feature-state", "b"], 0],
+    ],
+    "circle-opacity": visible,
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 1, 5, 3.75, 15, 33.75,],
+  };
+  if (withDetectStroke) {
+    paint["circle-stroke-width"] = 2;
+    paint["circle-stroke-opacity"] = visible;
+    paint["circle-stroke-color"] = ["match", ["coalesce", ["feature-state", "detectLv"], 0], 0, "transparent", 1, "#cb732b", 2, "#cb2b2b", "#0000",];
   }
+  return paint;
+}
+
+/* ---------- K-NET/KiK-net: マスタ 1 回 + feature-state 差分更新（Issue #18/#19） ---------- */
+
+/** 観測点マスタ（main から受信。index が TypedArray の座標系） */
+var kmoniMaster = null;
+/** 最新の kmoniUpdate メッセージ（activate 時の全点復元用） */
+var kmoniLatest = null;
+/** 前回反映した値（差分判定用） */
+var kmoniPrev = null;
+/** 次回更新で全点を強制反映する（background 復帰・マスタ再構築時） */
+var kmoniForceAll = true;
+
+/**
+ * 観測点マスタから GeoJSON ソースを 1 回だけ構築する。
+ * WorkerWindow の reload 等で再送された場合は再構築し、state を全点強制反映に戻す。
+ * @param {Array<object>} master 観測点マスタ
+ */
+function kmoniSetMaster(master) {
+  if (!Array.isArray(master) || master.length === 0) return;
+  kmoniMaster = master;
+  kmoniPrev = null;
+  kmoniForceAll = true;
+  if (!map || !map.getSource("knet_points")) return;
+  map.getSource("knet_points").setData({
+    type: "FeatureCollection",
+    features: master.map(function (elm, i) {
+      return {
+        type: "Feature",
+        id: i,
+        properties: { Code: elm.Code, Name: elm.Name, Region: elm.Region, Type: elm.Type, IsSuspended: elm.IsSuspended, checked: elm.checked },
+        geometry: { type: "Point", coordinates: [elm.Location.Longitude, elm.Location.Latitude] },
+      };
+    }),
+  });
+  if (kmoniLatest) kmoniApplyUpdate(kmoniLatest);
+}
+
+/**
+ * knet_points の feature-state を全消去し、次回更新で全点を再送する（Replay 時）
+ */
+function kmoniResetState() {
+  kmoniPrev = null;
+  kmoniForceAll = true;
+  if (map && map.getSource("knet_points")) map.removeFeatureState({ source: "knet_points" });
+}
+
+/**
+ * 毎秒の値を feature-state として反映する。変化した点のみ setFeatureState を呼ぶ。
+ * @param {{shindo:Float32Array, pga:Float32Array, rgb:Uint8Array, valid:Uint8Array, detectLv:Uint8Array}} msg
+ */
+function kmoniApplyUpdate(msg) {
+  if (!msg || !msg.shindo || !msg.valid || !msg.rgb) return;
+  kmoniLatest = msg;
+  if (!kmoniMaster || msg.shindo.length !== kmoniMaster.length) return; //マスタ未受信・不一致は破棄
+  if (background) return; //バックグラウンド中は描画しない（復帰時に kmoniForceAll で全点反映）
+  if (!map || !map.getSource("knet_points")) return;
+
+  var n = kmoniMaster.length;
+  var rgb = msg.rgb, valid = msg.valid, detectLv = msg.detectLv, shindo = msg.shindo, pga = msg.pga;
+  var prev = kmoniPrev;
+  var force = kmoniForceAll || !prev;
+  if (!prev) prev = kmoniPrev = { rgb: new Uint8Array(n * 3), valid: new Uint8Array(n), detectLv: new Uint8Array(n) };
+
+  for (let i = 0; i < n; i++) {
+    var lv = detectLv ? detectLv[i] : 0;
+    var r = rgb[3 * i], g = rgb[3 * i + 1], b = rgb[3 * i + 2];
+    if (!force && prev.valid[i] === valid[i] && prev.detectLv[i] === lv &&
+      prev.rgb[3 * i] === r && prev.rgb[3 * i + 1] === g && prev.rgb[3 * i + 2] === b) continue;
+    map.setFeatureState({ source: "knet_points", id: i }, { r: r, g: g, b: b, valid: valid[i], detectLv: lv, shindo: shindo[i], pga: pga ? pga[i] : 0 });
+    prev.valid[i] = valid[i];
+    prev.detectLv[i] = lv;
+    prev.rgb[3 * i] = r; prev.rgb[3 * i + 1] = g; prev.rgb[3 * i + 2] = b;
+  }
+  kmoniForceAll = false;
+
+  //開いているポップアップのみ内容を更新する
+  for (const code of Object.keys(kmoni_popup)) {
+    var idx = kmoniIndexByCode(code);
+    if (idx < 0) continue;
+    var popup = kmoni_popup[code];
+    if (popup && popup.isOpen()) popup.setHTML(generatePopupContent_K(kmoniPointParams(idx)));
+  }
+}
+
+var kmoniCodeIndex = null;
+/**
+ * 観測点コードから index を求める（初回に逆引きマップを構築）
+ * @param {string} code 観測点コード
+ * @returns {number} index。見つからなければ -1
+ */
+function kmoniIndexByCode(code) {
+  if (!kmoniMaster) return -1;
+  if (!kmoniCodeIndex || kmoniCodeIndex.master !== kmoniMaster) {
+    var m = new Map();
+    kmoniMaster.forEach(function (elm, i) { m.set(elm.Code, i); });
+    kmoniCodeIndex = { master: kmoniMaster, map: m };
+  }
+  var i = kmoniCodeIndex.map.get(code);
+  return i === undefined ? -1 : i;
+}
+
+/**
+ * index から、ポップアップ生成に必要な観測点情報（マスタ + 最新値）を組み立てる
+ * @param {number} i index
+ * @returns {object|null}
+ */
+function kmoniPointParams(i) {
+  if (!kmoniMaster || typeof i !== "number" || i < 0 || i >= kmoniMaster.length) return null;
+  var m = kmoniMaster[i];
+  var latest = kmoniLatest;
+  var valid = latest && latest.valid ? latest.valid[i] === 1 : false;
+  return {
+    Code: m.Code, Name: m.Name, Region: m.Region, Type: m.Type, IsSuspended: m.IsSuspended, checked: m.checked,
+    data: valid,
+    shindo: latest && latest.shindo ? latest.shindo[i] : null,
+    pga: latest && latest.pga ? latest.pga[i] : null,
+    rgb: latest && latest.rgb ? [latest.rgb[3 * i], latest.rgb[3 * i + 1], latest.rgb[3 * i + 2]] : [128, 128, 128],
+  };
+}
+
+/**
+ * S-net 観測点の更新（現行方式: 10 秒間隔・156 点のため setData のまま）
+ * @param {{data: object[]}} dataTmp
+ * @param {string} type "snet"
+ */
+function kmoniMapUpdate(dataTmp, type) {
+  if (!dataTmp || !dataTmp.data || background) return;
+  if (type !== "snet") return;
+  var geojson = { type: "FeatureCollection", features: [] };
+  snetMapData = dataTmp;
+
+  dataTmp.data.forEach(function (elm) {
+    if (elm.data) {
+      geojson.features.push({
+        type: "Feature",
+        properties: {
+          Code: elm.Code,
+          Type: elm.Type,
+          data: elm.data,
+          pga: elm.pga,
+          rgb: elm.rgb,
+          shindo: elm.shindo,
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [elm.Location.Longitude, elm.Location.Latitude],
+        },
+      });
+    }
+    if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) {
+      kmoni_popup[elm.Code].setHTML(generatePopupContent_K(elm));
+    }
+  });
+  if (map) map.getSource("snet_points").setData(geojson);
 }
 function generatePopupContent_K(params) {
   if (params.data) {
@@ -1939,34 +2028,104 @@ function generatePopupContent_TREM(params) {
         <div class='obsPGAWrap'>PGA ${(Math.floor(params.PGA * 100) / 100).toFixed(2)}</div></div>`;
 }
 
-function TREMRTSUpdate(dataTmp) {
-  if (!background) {
-    var geojson = { type: "FeatureCollection", features: [] };
-    Object.keys(dataTmp).forEach(function (key) {
-      var elm = dataTmp[key];
-      geojson.features.push({
+/* ---------- TREM-RTS: マスタ受信時 setData + 毎秒 feature-state（ハイブリッド。doc/PERF_FIX_DESIGN.md 2.5 章） ---------- */
+
+/** TREM-RTS 観測点マスタ [{Code, lon, lat}]（main から受信） */
+var tremMaster = null;
+/** Code → index */
+var tremIndexByCode = new Map();
+/** 前回報告があった index の集合（今回無ければ valid=0 にする） */
+var tremPrevReported = new Set();
+/** 前回反映した値（差分判定用）: index → [shindo, pga, r, g, b] */
+var tremPrevValues = new Map();
+var tremForceAll = true;
+
+/**
+ * TREM-RTS 観測点マスタから GeoJSON ソースを構築する（マスタ受信・再取得時）
+ * @param {Array<{Code:string, lon:number, lat:number}>} master
+ */
+function TREMRTSSetMaster(master) {
+  if (!Array.isArray(master)) return;
+  tremMaster = master;
+  tremIndexByCode = new Map();
+  master.forEach(function (elm, i) { tremIndexByCode.set(elm.Code, i); });
+  tremPrevReported = new Set();
+  tremPrevValues = new Map();
+  tremForceAll = true;
+  if (!map || !map.getSource("TREMRTS_points")) return;
+  map.getSource("TREMRTS_points").setData({
+    type: "FeatureCollection",
+    features: master.map(function (elm, i) {
+      return {
         type: "Feature",
-        properties: {
-          Code: elm.Code,
-          IsSuspended: elm.IsSuspended,
-          Name: elm.Name,
-          Region: elm.Region,
-          Type: elm.Type,
-          PGA: elm.PGA,
-          rgb: elm.rgb,
-          shindo: elm.shindo,
-        },
-        geometry: {
-          type: "Point",
-          coordinates: [elm.Location.Longitude, elm.Location.Latitude],
-        },
-      });
-      if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) {
-        kmoni_popup[elm.Code].setHTML(generatePopupContent_TREM(elm));
-      }
-    });
-    if (map) map.getSource("TREMRTS_points").setData(geojson);
+        id: i,
+        properties: { Code: elm.Code, Type: "TREMRTS" },
+        geometry: { type: "Point", coordinates: [elm.lon, elm.lat] },
+      };
+    }),
+  });
+  if (TREMRTS_TMP) TREMRTSUpdate(TREMRTS_TMP);
+}
+
+/**
+ * TREMRTS_points の feature-state を全消去し、次回更新で全点を再送する（Replay 時）
+ */
+function TREMRTSResetState() {
+  tremPrevReported = new Set();
+  tremPrevValues = new Map();
+  tremForceAll = true;
+  if (map && map.getSource("TREMRTS_points")) map.removeFeatureState({ source: "TREMRTS_points" });
+}
+
+/**
+ * 毎秒の TREM-RTS 値を feature-state に反映する。
+ * @param {Record<string, [number, number, number, number, number]>} dataTmp StID → [shindo, pga, r, g, b]
+ */
+function TREMRTSUpdate(dataTmp) {
+  if (background || !dataTmp || !tremMaster) return;
+  if (!map || !map.getSource("TREMRTS_points")) return;
+  var reported = new Set();
+
+  Object.keys(dataTmp).forEach(function (code) {
+    var i = tremIndexByCode.get(code);
+    if (i === undefined) return; //マスタに無い点は main 側でマスタ再取得を促している
+    var v = dataTmp[code];
+    reported.add(i);
+    var prev = tremPrevValues.get(i);
+    if (!tremForceAll && prev && prev[0] === v[0] && prev[1] === v[1] && prev[2] === v[2] && prev[3] === v[3] && prev[4] === v[4]) return;
+    map.setFeatureState({ source: "TREMRTS_points", id: i }, { valid: 1, shindo: v[0], pga: v[1], r: v[2], g: v[3], b: v[4] });
+    tremPrevValues.set(i, v);
+  });
+  //前回報告があり今回無い点は非表示にする
+  tremPrevReported.forEach(function (i) {
+    if (!reported.has(i)) {
+      map.setFeatureState({ source: "TREMRTS_points", id: i }, { valid: 0 });
+      tremPrevValues.delete(i);
+    }
+  });
+  tremPrevReported = reported;
+  tremForceAll = false;
+
+  //開いているポップアップのみ更新
+  for (const code of Object.keys(kmoni_popup)) {
+    var i = tremIndexByCode.get(code);
+    if (i === undefined) continue;
+    var popup = kmoni_popup[code];
+    var params = TREMRTSPointParams(i);
+    if (popup && popup.isOpen() && params) popup.setHTML(generatePopupContent_TREM(params));
   }
+}
+
+/**
+ * index からポップアップ用パラメータを組み立てる。未報告なら null
+ * @param {number} i index
+ * @returns {{Code:string, Type:string, shindo:number, PGA:number, rgb:number[]}|null}
+ */
+function TREMRTSPointParams(i) {
+  if (!tremMaster || typeof i !== "number" || i < 0 || i >= tremMaster.length) return null;
+  var v = TREMRTS_TMP ? TREMRTS_TMP[tremMaster[i].Code] : null;
+  if (!v) return null;
+  return { Code: tremMaster[i].Code, Type: "TREMRTS", shindo: v[0], PGA: v[1], rgb: [v[2], v[3], v[4]] };
 }
 
 function generatePopupContent_SEISJS(params) {
@@ -2102,6 +2261,8 @@ function JMAEstShindoDraw() {
 //🔴予報円🔴
 //予報円追加
 function psWaveEntry() {
+  //EEW があれば予報円アニメーションを（停止していれば）再開する
+  if (current_EEW.some(function (elm) { return !elm.is_cancel; })) psWaveAnmStart();
   current_EEW.forEach(function (elm) {
     if (!elm.is_cancel && elm.arrivalTime) {
       var countDownElm = document.getElementById(`EEW-${elm.EventID}`);
@@ -2688,6 +2849,9 @@ function tsunamiDataUpdate(data) {
       document.getElementById("tsunamiTitle").style.borderColor = tsunamiColorConv("Yoho");
   }
   EQinfo_Index = 0;
+
+  //警報・注意報・予報が全て解除（または取消）されたら点滅 interval のゲートを閉じる（Issue #23）
+  if (!Tsunami_MajorWarning && !Tsunami_Warning && !Tsunami_Watch && !Tsunami_Yoho) tsunamiData = null;
 }
 
 var EQinfo_Index = 0;
@@ -2740,7 +2904,7 @@ function tsunamiColorConv(str) {
 function tsunamiPopup(e) {
   if (e.originalEvent.cancelBubble) return;
 
-  if (tsunamiData.areas) {
+  if (tsunamiData && tsunamiData.areas) {
     var elm = tsunamiData.areas.find(function (elm) {
       return elm.name == e.features[0].properties.name;
     });
@@ -3088,6 +3252,90 @@ function draw_wepa(data) {
 
 var usgs_lastUpdate = 0;
 
+
+/* ---------- 避難所オーバーレイ: 固定 2 source + 2 layer、タイル LRU キャッシュ（Issue #22） ---------- */
+
+/** 保持するタイル数の上限（超過時は最古タイルの feature を破棄） */
+const HINANJO_TILE_CACHE_MAX = 64;
+/** tileKey → { eq: Feature[], ts: Feature[] }（挿入順 = 古い順） */
+var hinanjoTiles = new Map();
+/** 取得中の tileKey */
+var hinanjoInflight = new Set();
+const HINANJO_LAYERS = [
+  { id: "hinanjo_eq", url: "https://cyberjapandata.gsi.go.jp/xyz/skhb04", color: "#bf8715" },
+  { id: "hinanjo_ts", url: "https://cyberjapandata.gsi.go.jp/xyz/skhb05", color: "#2488c7" },
+];
+
+/**
+ * 避難所用の source/layer/click リスナーを 1 回だけ追加する
+ */
+function hinanjoInitLayers() {
+  var visible = config.data.overlay.includes("hinanjo") ? "visible" : "none";
+  HINANJO_LAYERS.forEach(function (def) {
+    if (map.getSource(def.id)) return;
+    map.addSource(def.id, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addLayer({
+      id: def.id,
+      type: "circle",
+      source: def.id,
+      layout: { visibility: visible },
+      paint: {
+        "circle-color": def.color,
+        "circle-radius": 6,
+        "circle-stroke-width": 1,
+        "circle-stroke-color": "#222",
+      },
+      minzoom: 10,
+      maxzoom: 22,
+    });
+    map.on("click", def.id, hinanjoPopup);
+  });
+}
+
+/**
+ * タイルの避難所データを取得し、統合ソースへ追加する。同一タイルの重複取得は抑止する。
+ * @param {{x:number, y:number, z:number}} ca タイル座標
+ */
+function hinanjoLoadTile(ca) {
+  var key = `${ca.z}/${ca.x}/${ca.y}`;
+  if (hinanjoTiles.has(key)) {
+    //LRU: 参照されたタイルを末尾へ
+    var v = hinanjoTiles.get(key);
+    hinanjoTiles.delete(key);
+    hinanjoTiles.set(key, v);
+    return;
+  }
+  if (hinanjoInflight.has(key)) return;
+  hinanjoInflight.add(key);
+
+  Promise.all(HINANJO_LAYERS.map(function (def) {
+    return fetch(`${def.url}/${key}.geojson`)
+      .then(function (r) { return r.ok ? r.json() : { features: [] }; })
+      .then(function (json) { return Array.isArray(json.features) ? json.features : []; })
+      .catch(function () { return []; });
+  })).then(function (results) {
+    hinanjoInflight.delete(key);
+    hinanjoTiles.set(key, { eq: results[0], ts: results[1] });
+    while (hinanjoTiles.size > HINANJO_TILE_CACHE_MAX) {
+      hinanjoTiles.delete(hinanjoTiles.keys().next().value);
+    }
+    hinanjoRefreshSources();
+  });
+}
+
+/**
+ * キャッシュ中の全タイルの feature を結合して統合ソースへ setData する
+ */
+function hinanjoRefreshSources() {
+  if (!map) return;
+  var eq = [], ts = [];
+  hinanjoTiles.forEach(function (v) {
+    for (const f of v.eq) eq.push(f);
+    for (const f of v.ts) ts.push(f);
+  });
+  map.getSource("hinanjo_eq")?.setData({ type: "FeatureCollection", features: eq });
+  map.getSource("hinanjo_ts")?.setData({ type: "FeatureCollection", features: ts });
+}
 
 function hinanjoPopup(e) {
   e.originalEvent.cancelBubble = true;
