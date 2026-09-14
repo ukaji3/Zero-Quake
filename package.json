@@ -4,7 +4,7 @@
   "version": "0.9.9",
   "description": "Zero Quake",
   "scripts": {
-    "start": "electron . --develop --debug-mode",
+    "start": "electron . -v",
     "build:linux": "electron-builder --linux",
     "build:win": "electron-builder --win",
     "build:all": "electron-builder --linux --win"

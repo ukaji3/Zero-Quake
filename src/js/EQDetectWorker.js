@@ -11,6 +11,13 @@ var EQDetect_List = []; //地震アイテムのリスト
 var pointsData = {}; //毎秒クリアされない、観測点のデータ
 var Replay = 0;
 
+/**
+ * 観測点の永続状態配列（StationMaster 受信時に構築、index は TypedArray の座標系）
+ * 注意: isCity は意図的に持たせない（pointsData 側のみ）。詳細は doc/PERF_FIX_DESIGN.md 2.3 章。
+ * @type {Array<{Code:string, Region:string, Location:{Latitude:number, Longitude:number}, data:boolean, pga:number, shindo:number, detect:boolean, detect2:boolean}>|null}
+ */
+var stations = null;
+
 var thresholds = {
   historyCount: 30, //比較する件数
   threshold01: 5, //検出とする観測点数
@@ -32,8 +39,12 @@ workerThreads.parentPort.postMessage({
 
 workerThreads.parentPort.on("message", (message) => {
   switch (message.action) {
+    case "StationMaster":
+      buildStations(message.data);
+      break;
     case "EQDetect":
-      EQDetect(message.data, message.date, message.detect); //観測点ごとのデータを毎秒受信
+      //観測点ごとの値（TypedArray）を毎秒受信
+      EQDetectFromArrays(message);
       break;
     case "EEWNow":
       EEWNow = message.data;
@@ -41,9 +52,86 @@ workerThreads.parentPort.on("message", (message) => {
     case "Replay":
       Replay = message.data;
       pointsData = {};
+      resetDetectFlags();
       break;
   }
 });
+
+/**
+ * 観測点マスタから永続状態配列を構築する
+ * @param {Array<{Code:string, Region:string, Location:{Latitude:number, Longitude:number}}>} master
+ */
+function buildStations(master) {
+  stations = master.map(function (elm) {
+    return {
+      Code: elm.Code,
+      Region: elm.Region,
+      Location: { Latitude: elm.Location.Latitude, Longitude: elm.Location.Longitude },
+      data: false,
+      pga: 0,
+      shindo: 0,
+      detect: false,
+      detect2: false,
+    };
+  });
+}
+
+/**
+ * 全観測点の検知フラグをリセットする（毎秒の先頭・Replay 時）
+ */
+function resetDetectFlags() {
+  if (!stations) return;
+  for (const st of stations) {
+    st.detect = false;
+    st.detect2 = false;
+  }
+}
+
+/**
+ * TypedArray で受信した毎秒の値を stations に反映し、既存の検知アルゴリズムを実行する
+ * @param {{shindo:Float32Array, pga:Float32Array, valid:Uint8Array, date:number, detect:boolean}} message
+ */
+function EQDetectFromArrays(message) {
+  if (!stations) return; //マスタ未受信（起動直後のレース）は破棄
+  var shindo = message.shindo;
+  var pga = message.pga;
+  var valid = message.valid;
+  if (!shindo || !pga || !valid || shindo.length !== stations.length) return;
+
+  resetDetectFlags();
+  for (let i = 0; i < stations.length; i++) {
+    const st = stations[i];
+    if (valid[i]) {
+      st.data = true;
+      st.shindo = shindo[i];
+      st.pga = pga[i];
+    } else {
+      st.data = false; //pga/shindo は前回値を保持（現行挙動）
+    }
+  }
+
+  EQDetect(stations, message.date, message.detect);
+
+  var detectLv = new Uint8Array(stations.length);
+  for (let i = 0; i < stations.length; i++) {
+    const st = stations[i];
+    detectLv[i] = st.detect2 ? 2 : st.detect ? 1 : 0;
+  }
+
+  //mainProcessへ情報送信（受信したバッファは transfer で返却）
+  workerThreads.parentPort.postMessage(
+    {
+      action: "PointsData_Update",
+      date: message.date,
+      shindo: shindo,
+      pga: pga,
+      valid: valid,
+      detectLv: detectLv,
+      EQDetect_List: EQDetect_List,
+    },
+    [shindo.buffer, pga.buffer, valid.buffer, detectLv.buffer]
+  );
+}
 
 function EQDetect(data, date, detect) {
   var ptData, detect0, pgaAvr;
@@ -207,14 +295,7 @@ function EQDetect(data, date, detect) {
       return true;
     }
   })
-
-  //mainProcessへ情報送信
-  workerThreads.parentPort.postMessage({
-    action: "PointsData_Update",
-    data: data,
-    date: date,
-    EQDetect_List: EQDetect_List,
-  });
+  //mainProcessへの送信は EQDetectFromArrays が TypedArray で行う
 }
 
 function GuessHypocenter(EQElm, data) {
