@@ -34,7 +34,11 @@ async function runWithArgs(args) {
     env: { ...process.env, STATE_MODULE_URL },
   });
   const lines = stdout.trimEnd().split("\n");
-  const result = JSON.parse(lines.pop());
+  const lastLine = lines.pop();
+  //子プロセスが JSON の行を出力せずに正常終了した場合も、原因がわかるよう標準出力を含めて失敗させる
+  //（読み込みに失敗した場合は子プロセスが終了コード 1 で終わり、execFile 自体が stderr 付きで失敗する）
+  if (!lastLine) throw new Error(`子プロセスが結果（JSON）を出力しなかった。stdout: ${JSON.stringify(stdout)}`);
+  const result = JSON.parse(lastLine);
   return { debugMode: result.debugMode, stdout: lines.join("\n") };
 }
 
