@@ -156,20 +156,10 @@
 
       } else if (engine == "CustomCommand") {
         // カスタムコマンドを使用した音声合成（Linux 等。fork 独自）
+        // コマンドは保存済みの設定からメインプロセスで組み立てる。ここでは読み上げ文字列だけを渡す（Issue #32）
         try {
           if (config.notice.voice_parameter.CustomCommand) {
-            // プレースホルダーを置換
-            let command = config.notice.voice_parameter.CustomCommand
-              .replace(/{text}/g, text)
-              .replace(/{rate}/g, Rate)
-              .replace(/{pitch}/g, Pitch)
-              .replace(/{volume}/g, Volume);
-
-            // メインプロセスにコマンド実行を依頼
-            window.electronAPI.send("message", {
-              action: "ExecuteTTSCommand",
-              command: command
-            });
+            window.electronAPI.ttsSpeakCustomCommand(text);
           } else {
             // コマンドが設定されていない場合はデフォルトにフォールバック
             speak(text, "Default");

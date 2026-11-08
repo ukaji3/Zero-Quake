@@ -926,17 +926,19 @@ function speak(text, engine) {
 
   if (engine == "CustomCommand") {
     // カスタムコマンドを使用した音声合成（fork 独自）
+    // 保存前のテンプレートで試すため、テスト実行の IPC を使う。コマンドはメインプロセスで組み立てる（Issue #32）
     const command = document.getElementById("CustomCommand").value;
     if (command) {
-      const replacedCommand = command
-        .replace(/{text}/g, text)
-        .replace(/{rate}/g, TTSspeed)
-        .replace(/{pitch}/g, TTSpitch)
-        .replace(/{volume}/g, TTSvolume);
-
-      window.electronAPI.send("message", {
-        action: "ExecuteTTSCommand",
-        command: replacedCommand
+      window.electronAPI.ttsTestCustomCommand({
+        template: command,
+        text: text,
+        rate: TTSspeed,
+        pitch: TTSpitch,
+        volume: TTSvolume,
+      }).then(function (result) {
+        if (!result.success) console.error("CustomCommand TTS error:", result.error);
+      }).catch(function (error) {
+        console.error("CustomCommand TTS error:", error);
       });
     } else {
       speak(text, "Default");
@@ -1457,58 +1459,36 @@ if (testCustomButton) {
       return;
     }
 
-    // プレースホルダーを置換
-    const replacedCommand = command
-      .replace(/{text}/g, TEST_TEXT)
-      .replace(/{rate}/g, TTSspeed)
-      .replace(/{pitch}/g, TTSpitch)
-      .replace(/{volume}/g, TTSvolume);
-
-    if (!window.electronAPI || !window.electronAPI.send) {
-      debugLog('ERROR: electronAPI.send is not available');
+    if (!window.electronAPI || !window.electronAPI.ttsTestCustomCommand) {
+      debugLog('ERROR: electronAPI.ttsTestCustomCommand is not available');
       showTestResult('CustomCommand', 'error', '❌ エラー: IPC通信が利用できません');
       button.disabled = false;
       return;
     }
 
-    // メインプロセスにテストコマンドの実行を依頼する
-    debugLog('Sending TestTTSCommand to main process:', replacedCommand);
-    window.electronAPI.send("message", {
-      action: "TestTTSCommand",
-      command: replacedCommand
-    });
-
-    // 結果を待つ（タイムアウト付き）
-    let timeoutId = setTimeout(() => {
-      showTestResult('CustomCommand', 'error', '❌ タイムアウト: コマンドの実行に時間がかかりすぎています');
-      button.disabled = false;
-    }, 10000);
-
-    // 結果を受信するリスナーを一時的に追加する
-    const resultHandler = (_event, response) => {
-      if (response.action === "TestTTSCommandResult") {
-        debugLog('TestTTSCommandResult received:', response);
-        clearTimeout(timeoutId);
-
-        if (response.success) {
-          showTestResult('CustomCommand', 'success', '✅ テスト成功！コマンドが正常に実行されました');
-        } else {
-          const errorMsg = response.error || '不明なエラー';
-          showTestResult('CustomCommand', 'error', `❌ エラー: ${errorMsg}`);
-        }
-
-        button.disabled = false;
-        if (window.electronAPI && window.electronAPI.removeListener) {
-          window.electronAPI.removeListener("message2", resultHandler);
-        }
+    // メインプロセスにテスト実行を依頼する。コマンドはメインプロセスで組み立て、
+    // 読み上げ文字列はシェルに解釈されない形で埋め込まれる（Issue #32）。
+    // メインプロセス側で 10 秒のタイムアウトを設けているため、結果は必ず返る
+    window.electronAPI.ttsTestCustomCommand({
+      template: command,
+      text: TEST_TEXT,
+      rate: TTSspeed,
+      pitch: TTSpitch,
+      volume: TTSvolume,
+    }).then((response) => {
+      debugLog('TTS test result received:', response);
+      if (response.success) {
+        showTestResult('CustomCommand', 'success', '✅ テスト成功！コマンドが正常に実行されました');
+      } else {
+        const errorMsg = response.error || '不明なエラー';
+        showTestResult('CustomCommand', 'error', `❌ エラー: ${errorMsg}`);
       }
-    };
-
-    if (window.electronAPI && window.electronAPI.on) {
-      window.electronAPI.on("message2", resultHandler);
-    } else {
-      debugLog('ERROR: Cannot register result handler - electronAPI.on not available');
-    }
+    }).catch((error) => {
+      debugLog('TTS test IPC error:', error);
+      showTestResult('CustomCommand', 'error', `❌ エラー: ${error.message}`);
+    }).finally(() => {
+      button.disabled = false;
+    });
   });
 } else {
   debugLog('ERROR: TestTTS_CustomCommand button not found in DOM!');

@@ -105,6 +105,8 @@ import {
   ProjectBS_Connection,
 } from "./main/RX_EEW.js";
 import { setOpenAtLogin_Linux } from "./main/linux.js";
+import { isTrustedLocalPage } from "./main/ipc_guard.js";
+import { registerTTSCommandIPC } from "./main/tts_ipc.js";
 
 import electron from "electron";
 const { app, BrowserWindow, ipcMain, dialog, Menu } = electron;
@@ -651,8 +653,16 @@ electron.app.on("ready", () => {
 
 app.on("second-instance", CreateMainWindow);
 
+//外部コマンドによる音声合成の IPC（fork 独自。Issue #32）
+registerTTSCommandIPC();
+
 //レンダラープロセスからのメッセージ
-ipcMain.on("message", (_event, response) => {
+ipcMain.on("message", (event, response) => {
+  //アプリ内のローカルの画面以外（外部の Web ページなど）からの送信は無視する（fork 独自。Issue #32）
+  if (!isTrustedLocalPage(event.senderFrame?.url, app.getAppPath())) {
+    debugLog("IPC message rejected from untrusted sender:", event.senderFrame?.url, response?.action);
+    return;
+  }
   switch (response.action) {
     case "kmoniReturn":
       ConvertKmoni(response.data, response.date);
@@ -767,42 +777,6 @@ ipcMain.on("message", (_event, response) => {
       break;
     case "Request_wepa":
       Req_JMA_wepa();
-      break;
-    case "ExecuteTTSCommand":
-      // カスタムコマンドによる音声合成の実行（Linux 等。fork 独自）
-      if (response.command) {
-        exec(response.command, (error, stdout, stderr) => {
-          if (error) {
-            console.error(`TTS Command Error: ${error.message}`);
-            return;
-          }
-          if (stderr) {
-            console.error(`TTS Command stderr: ${stderr}`);
-          }
-        });
-      }
-      break;
-    case "TestTTSCommand":
-      // カスタムコマンドのテスト実行。結果を設定画面へ返す（fork 独自）
-      debugLog("TestTTSCommand received. Command:", response.command);
-      if (response.command) {
-        exec(response.command, { timeout: 10000 }, (error, stdout, stderr) => {
-          debugLog("TestTTSCommand completed. Error:", error, "Stdout:", stdout, "Stderr:", stderr);
-          if (SettingWindow) {
-            SettingWindow.webContents.send("message2", {
-              action: "TestTTSCommandResult",
-              success: !error,
-              error: error ? error.message : null,
-              stdout: stdout,
-              stderr: stderr
-            });
-          } else {
-            debugLog("SettingWindow is null, cannot send TestTTSCommandResult");
-          }
-        });
-      } else {
-        debugLog("No command provided in TestTTSCommand");
-      }
       break;
     case "Request_usgs":
       Req_USGS();
