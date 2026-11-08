@@ -70,6 +70,12 @@ import {
 } from "./RX_JMAXML.js";
 import { update_data } from "./RX_OtherAPIs.js";
 import { isLinuxAutostartEnabled } from "./linux.js";
+import {
+  WORKER_RECREATE_WINDOW_MS,
+  WORKER_RECREATE_MAX,
+  decideRecreate,
+  shouldRecreateOnClose,
+} from "./worker_guard.js";
 
 export function CreateMainWindow() {
   try {
@@ -241,9 +247,7 @@ export function CreateMainWindow() {
   }
 }
 //ワーカーウィンドウ表示処理
-/** WorkerWindow 再生成の上限（10 分間に 5 回。超過時は自動再生成を停止する）。fork 独自（Issue #25） */
-const WORKER_RECREATE_WINDOW_MS = 600000;
-const WORKER_RECREATE_MAX = 5;
+/** 自動再生成の時刻の履歴（上限は worker_guard.js の WORKER_RECREATE_MAX 回 / WORKER_RECREATE_WINDOW_MS）。fork 独自（Issue #25） */
 var workerRecreateHistory = [];
 /** アプリ終了処理中か（終了時のウィンドウ close で再生成を予約しないため）。fork 独自（Issue #25） */
 var appQuitting = false;
@@ -267,13 +271,12 @@ function registerQuitHook() {
 export function Create_WorkerWindow() {
   registerQuitHook();
   if (appQuitting) return;
-  var now = Date.now();
-  workerRecreateHistory = workerRecreateHistory.filter(function (t) { return now - t < WORKER_RECREATE_WINDOW_MS; });
-  if (workerRecreateHistory.length >= WORKER_RECREATE_MAX) {
+  const decision = decideRecreate(workerRecreateHistory, Date.now());
+  workerRecreateHistory = decision.history;
+  if (!decision.allowed) {
     console.error(new Date().toLocaleString(), "[WorkerWindow]", `再生成が ${WORKER_RECREATE_MAX} 回/${WORKER_RECREATE_WINDOW_MS / 60000} 分を超えたため自動再生成を停止します`);
     return;
   }
-  workerRecreateHistory.push(now);
 
   if (WorkerWindow && !WorkerWindow.isDestroyed()) {
     WorkerWindow.intentionalClose = true;
@@ -290,7 +293,7 @@ export function Create_WorkerWindow() {
   debugLog("WorkerWindow created");
   win.on("close", () => {
     if (WorkerWindow === win) WorkerWindow = null;
-    if (win.intentionalClose || appQuitting) return; //意図的な閉鎖（作り直し）・終了中は再生成を予約しない
+    if (!shouldRecreateOnClose(win, appQuitting)) return; //意図的な閉鎖（作り直し）・終了中は再生成を予約しない
     debugLog("WorkerWindow closed unexpectedly; scheduling recreate");
     setTimeout(Create_WorkerWindow, 2000)
   });
