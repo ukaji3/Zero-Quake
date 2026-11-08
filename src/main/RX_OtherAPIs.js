@@ -4,6 +4,7 @@ import * as turf from "@turf/turf";
 import { throttle, NormalizeShindo, newDate2, FERegion } from "./constants.js";
 import { MainWindow, SettingWindow, Create_SettingWindow, messageToMainWindow } from "./windows.js";
 import { MargeEQInfo, AlertEQInfo, eqInfo } from "./PROC_EQInfo.js";
+import { FORK_RELEASES_API } from "./fork_config.js";
 
 import {
   package_ver,
@@ -41,7 +42,8 @@ export var checkUpdate = throttle(async function (userAction) {
       }
     };
 
-    fetch(`https://api.github.com/repos/0quake/Zero-Quake/releases?_=${Date.now()}`)
+    //fork の Releases を参照する（upstream は Windows 版のみ配布のため。fork 独自: Issue #35）
+    fetch(`${FORK_RELEASES_API}?_=${Date.now()}`)
       .then((r) => {
         ensureOk(r, "GitHub Releases");
         return r.json();
