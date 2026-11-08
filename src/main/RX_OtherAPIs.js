@@ -12,6 +12,7 @@ import {
   USGS_CurrentInfoNumber,
   UpdateStatus,
   GeneralError_handler,
+  ensureOk,
 } from "./state.js";
 
 export var update_data = null;
@@ -42,7 +43,7 @@ export var checkUpdate = throttle(async function (userAction) {
 
     fetch(`https://api.github.com/repos/0quake/Zero-Quake/releases?_=${Date.now()}`)
       .then((r) => {
-        if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+        ensureOk(r, "GitHub Releases");
         return r.json();
       }).then((json) => {
         if (!Array.isArray(json) || !json[0]) throw new Error("GitHub Releases APIが空または不正なデータを返しました。");
@@ -102,7 +103,7 @@ export var checkUpdate = throttle(async function (userAction) {
         }
 
       }).catch((err) => {
-        GeneralError_handler(err)
+        GeneralError_handler(err, "GitHub Releases")
         UpdateError(err);
       });
 
@@ -117,7 +118,7 @@ var usgsLastGenerated = 0;
 export var Req_USGS = throttle(function () {
   fetch(`https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&limit=${USGS_CurrentInfoNumber}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "USGS");
       return r.json();
     }).then((json) => {
       var LastGenTmp = Number(json?.metadata?.generated);
@@ -155,7 +156,7 @@ export var Req_USGS = throttle(function () {
         messageToMainWindow({ action: "Deny_additionalEQInfo_USGS" });
       }
     }).catch((err) => {
-      GeneralError_handler(err);
+      GeneralError_handler(err, "USGS");
       messageToMainWindow({ action: "Deny_additionalEQInfo_USGS" });
     });
 }, 2000);
@@ -164,7 +165,7 @@ export var Req_USGS = throttle(function () {
 export function Req_NarikakunList(count) {
   fetch(`https://earthquake-api-v2.nakn.jp/api/v2/list?limit=${JMA_CurrentInfoNumber}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "nakn");
       return r.json();
     }).then((json) => {
       if (!json || json.status != "ok" || !json.items) throw new Error("ntools APIが不正なデータかstatus≠okを返した。");
@@ -217,7 +218,7 @@ export function Req_NarikakunList(count) {
 
       UpdateStatus("ntool", "success");
     }).catch((err) => {
-      GeneralError_handler(err);
+      GeneralError_handler(err, "nakn");
       UpdateStatus("ntool", "Error");
       messageToMainWindow({ action: "Deny_additionalEQInfo_JMA" });
     });

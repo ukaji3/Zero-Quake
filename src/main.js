@@ -6,6 +6,9 @@ import {
   setStatusListener,
   UpdateStatus,
   GeneralError_handler,
+  ensureOk,
+  DEBUG_MODE,
+  debugLog,
   JMA_CurrentInfoNumber,
   USGS_CurrentInfoNumber,
 } from "./main/state.js";
@@ -92,6 +95,15 @@ import os from "os";
 import { exec } from "child_process";
 var packageJson = JSON.parse(await readFile(path.join(import.meta.dirname, "../package.json")));
 var package_ver = packageJson.version;
+
+//デバッグモード時の起動情報（fork 独自。Issue #27）
+if (DEBUG_MODE) {
+  debugLog("Debug mode enabled");
+  debugLog("Command line arguments:", process.argv);
+  debugLog("Platform:", process.platform);
+  debugLog("Session type:", process.env.XDG_SESSION_TYPE);
+  debugLog("Current desktop:", process.env.XDG_CURRENT_DESKTOP);
+}
 
 electron.protocol.registerSchemesAsPrivileged([
   {
@@ -290,7 +302,7 @@ function ScheduledExecution() {
 
   fetch(`https://axis.prioris.jp/api/token/refresh/?token=${config.Source.axis.AccessToken}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "Axis token");
       return r.json();
     }).then((json) => {
       if (json.status == "generate a new token") {
@@ -314,7 +326,7 @@ function ScheduledExecution() {
         SystemNotification("Axisのアクセストークンが不正です。設定を修正してください。");
       }
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "Axis token")
       UpdateStatus("axis", "Error");
     });
 }

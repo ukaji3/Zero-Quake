@@ -15,6 +15,7 @@ import {
   JMA_CurrentInfoNumber,
   UpdateStatus,
   GeneralError_handler,
+  ensureOk,
 } from "./state.js";
 const OneDayInMS = 1000 * 60 * 60 * 24;
 
@@ -23,7 +24,7 @@ var jmaXML_Fetched = [];
 export function Req_JMA_gaikyo() {
   fetch(`https://www.data.jma.go.jp/svd/eqev/data/gaikyo/?_=${Date.now()}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA gaikyo");
       return r.text();
     }).then((text) => {
       const doc = DomPsr.parseFromString(text, "text/html");
@@ -81,7 +82,7 @@ export function Req_JMA_gaikyo() {
       data.sort((a, b) => a.date < b.date ? 1 : -1);
       messageToMainWindow({ action: "Return_gaikyo", data: data });
     }).catch((err) => {
-      GeneralError_handler(err);
+      GeneralError_handler(err, "JMA gaikyo");
       messageToMainWindow({ action: "Return_gaikyo", data: [] });
     });
 }
@@ -89,12 +90,12 @@ export function Req_JMA_gaikyo() {
 export function Req_JMA_wepa() {
   fetch(`https://www.jma.go.jp/bosai/pacifictsunami/data/list.json?_=${Date.now()}`)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA wepa");
       return r.json();
     }).then((json) => {
       messageToMainWindow({ action: "Return_wepa", data: json });
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "JMA wepa")
       messageToMainWindow({ action: "Return_wepa", data: [] });
     });
 }
@@ -109,7 +110,7 @@ export const UpdateEQInfo_Loop = function () {//ループ
   try {
     UpdateEQInfoCore();
   } catch (err) {
-    GeneralError_handler(err);
+    GeneralError_handler(err, "UpdateEQInfo");
   } finally {
     if (UpdateEQInfo_Timer) clearTimeout(UpdateEQInfo_Timer);
     UpdateEQInfo_Timer = setTimeout(UpdateEQInfo_Loop, config.Info?.EQInfo?.Interval || 60000);
@@ -124,7 +125,7 @@ export function UpdateEQInfoCore() {
     Req_JMAJSONList();
     Req_NarikakunList(state.EQ_FetchCount);
   } catch (err) {
-    GeneralError_handler(err);
+    GeneralError_handler(err, "UpdateEQInfo");
   }
   state.EQ_FetchCount++;
 };
@@ -134,7 +135,7 @@ export function Req_JMAXMLList(count, longFeed) {
   var url = `https://www.data.jma.go.jp/developer/xml/feed/${longFeed ? "eqvol_l.xml" : "eqvol.xml"}`
   fetch(url)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA XML list");
       return r.text();
     }).then((text) => {
       const xml = DomPsr.parseFromString(text, "text/xml");
@@ -204,7 +205,7 @@ export function Req_JMAXMLList(count, longFeed) {
 
       UpdateStatus("JMAXML", "success");
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "JMA XML list")
       UpdateStatus("JMAXML", "Error");
     });
 }
@@ -212,7 +213,7 @@ export function Req_JMAXMLList(count, longFeed) {
 export function Req_JMAJSONList() {
   fetch("https://www.jma.go.jp/bosai/quake/data/list.json")
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA JSON list");
       return r.json();
     }).then((json) => {
       var HokkaidoSanrikuURL = json.find(function (el) {
@@ -220,14 +221,14 @@ export function Req_JMAJSONList() {
       })
       if (HokkaidoSanrikuURL) Req_Hokkaidosanriku_JSON(`https://www.jma.go.jp/bosai/quake/data/${HokkaidoSanrikuURL.json}`)
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "JMA JSON list")
     });
 }
 
 export function Req_Hokkaidosanriku_JSON(url) {
   fetch(url)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA HokkaidoSanriku");
       return r.json();
     }).then((json) => {
       var data = {
@@ -248,7 +249,7 @@ export function Req_Hokkaidosanriku_JSON(url) {
 
       Process_Hokkaidosanriku(data)
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "JMA HokkaidoSanriku")
     });
 }
 
@@ -287,7 +288,7 @@ export function Req_JMAXML(url, count) {
 
   fetch(url)
     .then((r) => {
-      if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+      ensureOk(r, "JMA XML");
       return r.text();
     }).then((text) => {
 
@@ -996,7 +997,7 @@ export function Req_JMAXML(url, count) {
       }
       UpdateStatus("JMAXML", "success");
     }).catch((err) => {
-      GeneralError_handler(err)
+      GeneralError_handler(err, "JMA XML")
       UpdateStatus("JMAXML", "Error");
     });
 }

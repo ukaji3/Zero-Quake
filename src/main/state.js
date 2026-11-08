@@ -76,8 +76,57 @@ export function UpdateStatus(type, condition, timeStamp) {
   }
 }
 
-export function GeneralError_handler(err) {
-  console.error(new Date().toLocaleString(), err);
+/**
+ * デバッグモード。起動引数に -v / --debug / --verbose / --debug-mode のいずれかがあると有効になる。
+ * `npm start`（upstream の `electron . --develop --debug-mode`）でも有効になるよう --debug-mode を含める。
+ * fork 独自（Ubuntu 版のトレイ・音声合成の調査用。Issue #27, #30）
+ * @type {boolean}
+ */
+export const DEBUG_MODE = ["-v", "--debug", "--verbose", "--debug-mode"].some((flag) => process.argv.includes(flag));
+
+/**
+ * デバッグモード時のみ時刻付きでログ出力する。fork 独自（Issue #27）
+ * @param {...unknown} args 出力内容
+ */
+export function debugLog(...args) {
+  if (DEBUG_MODE) console.log(new Date().toLocaleString(), "[DEBUG]", ...args);
+}
+
+/**
+ * 共通エラーハンドラ。
+ * 情報源名を指定した場合は先頭に `[情報源名]` を付けて出力する（fork 独自。Issue #27）。
+ * @param {unknown} err エラー
+ * @param {string} [source] 情報源名
+ */
+export function GeneralError_handler(err, source) {
+  if (source) console.error(new Date().toLocaleString(), `[${source}]`, err);
+  else console.error(new Date().toLocaleString(), err);
+}
+
+/**
+ * HTTP レスポンスの状態を検査し、失敗時は情報源名と URL を含むエラーを投げる。fork 独自（Issue #27）
+ * URL のクエリ文字列とフラグメントは出力しない（Axis のアクセストークンなどをログに残さないため）。
+ * @param {Response} r fetch のレスポンス
+ * @param {string} source 情報源名
+ * @returns {Response} 成功時は受け取ったレスポンスをそのまま返す
+ */
+export function ensureOk(r, source) {
+  if (!r.ok) throw new Error(`HTTP Error: ${r.status} (${source}: ${stripQuery(r.url)})`);
+  return r;
+}
+
+/**
+ * URL からクエリ文字列とフラグメントを取り除く。解析できない値は空文字列を返す。
+ * @param {string} url 対象 URL
+ * @returns {string} `origin + pathname`
+ */
+function stripQuery(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return "";
+  }
 }
 
 var LastRunTime = 0;

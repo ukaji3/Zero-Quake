@@ -22,6 +22,7 @@ import {
   state,
   UpdateStatus,
   GeneralError_handler,
+  ensureOk,
   IntervalRun,
 } from "./state.js";
 
@@ -60,12 +61,12 @@ export function TREMRTS_SSE() {
 
       UpdateStatus("TREM-RTS", "success", new Date(json.ts));
     } catch (err) {
-      GeneralError_handler(err);
+      GeneralError_handler(err, "TREM-RTS SSE");
       UpdateStatus("TREM-RTS", "Error", new Date());
     }
   });
   TremRts_es.addEventListener('error', (err) => {
-    GeneralError_handler(err);
+    GeneralError_handler(err, "TREM-RTS SSE");
     UpdateStatus("TREM-RTS", "Error", new Date());
   });
 }
@@ -83,7 +84,7 @@ export function TREMRTS_Replay() {
     `https://api.core.exptech.dev/api/v3/trem/rts/${Time10Dig}`,
     { signal: AbortSignal.timeout(4000) }
   ).then((r) => {
-    if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+    ensureOk(r, "TREM-RTS replay");
     return r.json();
   }).then((json) => {
     const TremRtsData = formatTremData(json);
@@ -96,7 +97,7 @@ export function TREMRTS_Replay() {
     messageToMainWindow(TremRtsData_Marged);
     UpdateStatus("TREM-RTS", "success", new Date(json.ts));
   }).catch((err) => {
-    GeneralError_handler(err);
+    GeneralError_handler(err, "TREM-RTS replay");
     UpdateStatus("TREM-RTS", "Error", new Date());
   });
 }
@@ -130,7 +131,7 @@ export var Req_TremRts_sta = throttle(function () {
     `https://static.core.exptech.dev/resource/station?_=${Date.now()}`,
     { signal: AbortSignal.timeout(4000) }
   ).then((r) => {
-    if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+    ensureOk(r, "TREM-RTS station");
     return r.text();
   }).then((text) => {
     text.split(/\r?\n/).forEach(function (line) {
@@ -154,7 +155,7 @@ export var Req_TremRts_sta = throttle(function () {
     });
 
   }).catch((err) => {
-    GeneralError_handler(err)
+    GeneralError_handler(err, "TREM-RTS station")
     UpdateStatus("TREM-RTS", "Error");
   });
 }, 5000);
@@ -173,7 +174,7 @@ export function Req_JMATide_sta() {
     `https://www.jma.go.jp/bosai/tidelevel/const/tide_area.json?_=${Date.now()}`,
     { signal: AbortSignal.timeout(4000) }
   ).then((r) => {
-    if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+    ensureOk(r, "JMA tide station");
     return r.json();
   }).then((json) => {
     var stations = []
@@ -197,7 +198,7 @@ export function Req_JMATide_sta() {
     JMATide_sta = stations.slice(0, 10)
     //↑近い順10件
   }).catch((err) => {
-    GeneralError_handler(err)
+    GeneralError_handler(err, "JMA tide station")
     messageToMainWindow({ action: "Return_tide", data: [] });
   });
 }
@@ -213,7 +214,7 @@ export function Req_JMATide() {
     if (!JMATide_astro[filename]) {
       fetch(`https://www.jma.go.jp/bosai/tidelevel/const/tide_astro/${filename}`)
         .then((r) => {
-          if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+          ensureOk(r, "JMA tide astro");
           return r.json();
         }).then((json) => {
           var tide = json.tide;
@@ -226,14 +227,14 @@ export function Req_JMATide() {
             }
           }
         }).catch((err) => {
-          GeneralError_handler(err)
+          GeneralError_handler(err, "JMA tide astro")
           messageToMainWindow({ action: "Return_tide", data: [] });
         });
     }
 
     fetch(`https://www.jma.go.jp/bosai/tidelevel/data/tide/tide_obs_${NormalizeDate(2, new Date() - Replay)}_${st.code}.json`)
       .then((r) => {
-        if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+        ensureOk(r, "JMA tide");
         return r.json();
       }).then((json) => {
         if (json.tide && json.tide.length >= 4) {
@@ -270,7 +271,7 @@ export function Req_JMATide() {
           messageToMainWindow({ action: "Return_tide", data: sort_by_dist_TIDE(Object.values(JMATide_obs)) });
         }
       }).catch((err) => {
-        GeneralError_handler(err)
+        GeneralError_handler(err, "JMA tide")
         messageToMainWindow({ action: "Return_tide", data: [] });
       });
   })
@@ -288,7 +289,7 @@ export function Req_EarlyEst() {
     "http://early-est.rm.ingv.it/monitor.xml",
     { signal: AbortSignal.timeout(4000) }
   ).then((r) => {
-    if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+    ensureOk(r, "Early-Est");
     return r.text();
   }).then((text) => {
     UpdateStatus("Early-est", "success");
@@ -324,7 +325,7 @@ export function Req_EarlyEst() {
       }
     );
   }).catch((err) => {
-    GeneralError_handler(err)
+    GeneralError_handler(err, "Early-Est")
     UpdateStatus("Early-est", "Error");
   });
 }
@@ -428,7 +429,7 @@ export function Req_kmoni() {//済
     url,
     { signal: AbortSignal.timeout(5000) }
   ).then((r) => {
-    if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+    ensureOk(r, "kmoni");
     return r.arrayBuffer();
   }).then((buffer) => {
     Kmoni_ErrorCount = 0;
@@ -438,7 +439,7 @@ export function Req_kmoni() {//済
       date: ReqTime,
     });
   }).catch((err) => {
-    GeneralError_handler(err)
+    GeneralError_handler(err, "kmoni")
     Kmoni_ErrorCount++;
     if (Kmoni_ErrorCount > 3) {//エラー回数が溜まったらURLを替える
       Kmoni_ErrorCount = 0;
@@ -464,7 +465,7 @@ export function Req_SNet() {
     `https://www.msil.go.jp/data/tiles/smoni/targetTimes.json?${Date.now()}`
     , { signal: AbortSignal.timeout(4000) }
   ).then((r) => {
-    if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+    ensureOk(r, "msil");
     return r.text();
   }).then((text) => {
     var json = JSON.parse(text.replace(/\s+/g, ''));
@@ -483,7 +484,7 @@ export function Req_SNet() {
           `https://www.msil.go.jp/data/tiles/smoni/tileimage/${basetime}/${basetime}/5/28/${y}.png`
           , { signal: AbortSignal.timeout(4000) }
         ).then((r) => {
-          if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+          ensureOk(r, "msil");
           return r.arrayBuffer();
         }).then((buffer) => {
           messageToWorkerWindow({
@@ -496,7 +497,7 @@ export function Req_SNet() {
           UpdateStatus("msilImg", "success");
 
         }).catch((err) => {
-          GeneralError_handler(err)
+          GeneralError_handler(err, "msil")
           UpdateStatus("msilImg", "Error");
         });
       }
@@ -507,7 +508,7 @@ export function Req_SNet() {
     }
 
   }).catch((err) => {
-    GeneralError_handler(err)
+    GeneralError_handler(err, "msil")
     UpdateStatus("msilImg", "Error");
   });
 }
@@ -518,7 +519,7 @@ export function Req_Seisjs_sta() {
     `https://api.wolfx.jp/seis_list.json?_=${Date.now()}`
     , { signal: AbortSignal.timeout(4000) }
   ).then((r) => {
-    if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+    ensureOk(r, "SeisJS station");
     return r.json();
   }).then((json) => {
     Seisjs_sta = json;
@@ -527,7 +528,7 @@ export function Req_Seisjs_sta() {
       data: Seisjs_sta,
     });
   }).catch((err) => {
-    GeneralError_handler(err);
+    GeneralError_handler(err, "SeisJS station");
     UpdateStatus("wolfx", "Error");
   });
 }
@@ -651,14 +652,14 @@ export async function SetKmoniOffset(func) {
           `http://www.kmoni.bosai.go.jp/webservice/server/pros/latest.json?_=${Date.now()}`
           , { signal: AbortSignal.timeout(4000) }
         ).then((r) => {
-          if (!r.ok) throw new Error(`HTTP Error: ${r.status}`);
+          ensureOk(r, "kmoni offset");
           return r.json();
         }).then((json) => {
           var resTime = new Date(json.latest_time);
           if (Number(resTimeTmp) !== Number(resTime)) calculatedOffset = new Date() - resTime - (new Date() - reqTime) / 2;
           resTimeTmp = resTime;
         }).catch((err) => {
-          GeneralError_handler(err)
+          GeneralError_handler(err, "kmoni offset")
           UpdateStatus("kmoniImg", "Error");
         });
 
@@ -672,7 +673,7 @@ export async function SetKmoniOffset(func) {
     calculatedOffset += 200;
   } catch (err) {
     calculatedOffset = 2500;
-    GeneralError_handler(err)
+    GeneralError_handler(err, "kmoni offset")
   }
   KmoniOffset = calculatedOffset;
   state.kmoniOffset = calculatedOffset;
