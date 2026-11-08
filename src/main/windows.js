@@ -52,6 +52,7 @@ import {
   kmoniTimeTmp,
   JMA_CurrentInfoNumber,
   USGS_CurrentInfoNumber,
+  debugLog,
 } from "./state.js";
 import { EEW_Active, EEW_Storage } from "./PROC_EEW.js";
 import { eqInfo, EQCount_process } from "./PROC_EQInfo.js";
@@ -240,34 +241,77 @@ export function CreateMainWindow() {
   }
 }
 //ワーカーウィンドウ表示処理
+/** WorkerWindow 再生成の上限（10 分間に 5 回。超過時は自動再生成を停止する）。fork 独自（Issue #25） */
+const WORKER_RECREATE_WINDOW_MS = 600000;
+const WORKER_RECREATE_MAX = 5;
+var workerRecreateHistory = [];
+/** アプリ終了処理中か（終了時のウィンドウ close で再生成を予約しないため）。fork 独自（Issue #25） */
+var appQuitting = false;
+var quitHookRegistered = false;
+
+/**
+ * before-quit で appQuitting を立てるフックを 1 回だけ登録する。
+ * モジュール読み込み時に app へ触れると Electron 外（node --test）で例外になるため、初回の生成時に登録する。
+ */
+function registerQuitHook() {
+  if (quitHookRegistered) return;
+  app.on("before-quit", () => { appQuitting = true; });
+  quitHookRegistered = true;
+}
+
+/**
+ * 非表示の WorkerWindow（強震モニタ画像解析・音声再生）を生成する。
+ * 既存ウィンドウを閉じて作り直す場合、close ハンドラの自動再生成が二重に走らないよう
+ * `intentionalClose` フラグで抑止する（fork 独自。Issue #25: 2 秒周期の再生成ループ防止）。
+ */
 export function Create_WorkerWindow() {
-  if (WorkerWindow) WorkerWindow.close();
-  WorkerWindow = new BrowserWindow({
+  registerQuitHook();
+  if (appQuitting) return;
+  var now = Date.now();
+  workerRecreateHistory = workerRecreateHistory.filter(function (t) { return now - t < WORKER_RECREATE_WINDOW_MS; });
+  if (workerRecreateHistory.length >= WORKER_RECREATE_MAX) {
+    console.error(new Date().toLocaleString(), "[WorkerWindow]", `再生成が ${WORKER_RECREATE_MAX} 回/${WORKER_RECREATE_WINDOW_MS / 60000} 分を超えたため自動再生成を停止します`);
+    return;
+  }
+  workerRecreateHistory.push(now);
+
+  if (WorkerWindow && !WorkerWindow.isDestroyed()) {
+    WorkerWindow.intentionalClose = true;
+    WorkerWindow.close();
+  }
+  var win = new BrowserWindow({
     webPreferences: {
       preload: path.join(import.meta.dirname, "../js/preload.js"),
       backgroundThrottling: false,
     },
     show: false,
   });
-  WorkerWindow.on("close", () => {
-    WorkerWindow = null;
+  WorkerWindow = win;
+  debugLog("WorkerWindow created");
+  win.on("close", () => {
+    if (WorkerWindow === win) WorkerWindow = null;
+    if (win.intentionalClose || appQuitting) return; //意図的な閉鎖（作り直し）・終了中は再生成を予約しない
+    debugLog("WorkerWindow closed unexpectedly; scheduling recreate");
     setTimeout(Create_WorkerWindow, 2000)
   });
-  WorkerWindow.webContents.on("did-finish-load", () => {
-    WorkerWindow.webContents.send("message2", {
+  win.webContents.on("did-finish-load", () => {
+    win.webContents.send("message2", {
       action: "setting",
       data: config,
     });
   });
-  WorkerWindow.loadFile("src/WorkerWindow.html");
-  WorkerWindow.on("unresponsive", () => {
-    WorkerWindow.responsive = true;
+  win.loadFile("src/WorkerWindow.html");
+  win.on("unresponsive", () => {
+    win.responsive = true;
     setTimeout(function () {
-      if (WorkerWindow.responsive) Create_WorkerWindow();
+      if (WorkerWindow === win && !win.isDestroyed() && win.responsive) {
+        debugLog("WorkerWindow unresponsive; recreating");
+        Create_WorkerWindow();
+      }
     }, 5000);
   });
-  WorkerWindow.on("responsive", () => {
-    WorkerWindow.responsive = false;
+  win.on("responsive", () => {
+    win.responsive = false;
   });
 }
 //設定ウィンドウ表示処理
