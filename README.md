@@ -22,19 +22,19 @@
 
 ### Linux (Ubuntu) インストール
 
-**クイックスタート**: [QUICKSTART_UBUNTU.md](QUICKSTART_UBUNTU.md) - 最速インストール方法
+**クイックスタート**: [QUICKSTART_UBUNTU.md](doc/QUICKSTART_UBUNTU.md) - 最速インストール方法
 
-**詳細ガイド**: [LINUX_INSTALL.md](LINUX_INSTALL.md) - 完全なインストール・設定ガイド
+**詳細ガイド**: [LINUX_INSTALL.md](doc/LINUX_INSTALL.md) - 完全なインストール・設定ガイド
 
-**音声合成設定**: [LINUX_TTS_GUIDE.md](LINUX_TTS_GUIDE.md) - Linux での音声通知設定
+**音声合成設定**: [LINUX_TTS_GUIDE.md](doc/LINUX_TTS_GUIDE.md) - Linux での音声通知設定
 
 ```bash
 # 簡単インストール（推奨）
 cd dist
 ../install-ubuntu.sh
 
-# または手動インストール
-sudo apt install ./dist/zeroquake_0.9.5_amd64.deb
+# または手動インストール（<バージョン> は dist/ にできた deb の版。例: 0.9.10）
+sudo apt install ./dist/zeroquake_<バージョン>_amd64.deb
 ```
 
 ## ご注意
