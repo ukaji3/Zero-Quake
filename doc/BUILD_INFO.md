@@ -163,4 +163,4 @@ GNOME では AppIndicator 拡張機能のインストールが必要です。詳
 
 ## ライセンス
 
-MIT License - 詳細は [LICENSE.md](LICENSE.md) を参照
+GNU General Public License v2.0 - 詳細は [LICENSE.md](../LICENSE.md) を参照
