@@ -216,7 +216,7 @@ window.addEventListener("load", () => {
       document.getElementById("kmoni_Message").innerHTML = json?.message || "";
     }).catch(function () { });
 
-  psWaveAnm(); //予報円描画着火
+  psWaveAnmStart(); //予報円描画着火（EEW が無ければ即停止する。fork 独自: Issue #23）
   setInterval(function () {
     //時計（ローカル時刻）更新
     if (UTDialogShow && !background)
@@ -898,13 +898,29 @@ document.getElementById("CloseTsunamiRevocation").addEventListener("click", func
 });
 
 var AnmTimer;
+/** 予報円アニメーションが動作中か。EEW が無い間は停止する（fork 独自。Issue #23） */
+var psWaveAnmRunning = false;
+/**
+ * 予報円アニメーションを（停止していれば）開始する。fork 独自（Issue #23）
+ */
+function psWaveAnmStart() {
+  if (psWaveAnmRunning) return;
+  psWaveAnmRunning = true;
+  psWaveAnm();
+}
 function psWaveAnm() {
-  for (var elm of current_EEW) {
-    if (!elm.is_cancel) {
-      psWaveCalc(elm.EventID);
-    }
-  }
   if (AnmTimer) clearTimeout(AnmTimer)
+  AnmTimer = null;
+
+  //取り消されていない EEW が無ければタイマーを再設定せずに停止する（fork 独自。Issue #23）
+  var active = current_EEW.filter(function (elm) { return !elm.is_cancel; });
+  if (active.length === 0) {
+    psWaveAnmRunning = false;
+    return;
+  }
+  for (var elm of active) {
+    psWaveCalc(elm.EventID);
+  }
 
   if (background) {
     AnmTimer = setTimeout(psWaveAnm, 1000);
@@ -1720,6 +1736,8 @@ function JMAEstShindoDraw() {
 //🔴予報円🔴
 //予報円追加
 function psWaveEntry() {
+  //EEW があれば予報円アニメーションを（停止していれば）再開する（fork 独自。Issue #23）
+  if (current_EEW.some(function (elm) { return !elm.is_cancel; })) psWaveAnmStart();
   current_EEW.forEach(function (elm) {
     if (!elm.is_cancel && elm.arrivalTime) {
       var countDownElm = document.getElementById(`EEW-${elm.EventID}`);
