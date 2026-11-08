@@ -31,3 +31,17 @@ export function isTrustedLocalPage(frameUrl, appPath) {
   const resolved = path.resolve(filePath);
   return resolved === root || resolved.startsWith(root + path.sep);
 }
+
+/**
+ * IPC の送信元が、指定したウィンドウの画面かを判定する（webContents の ID で比較する）。
+ * `from` などの送信内容は送信側が自由に書けるため、送信元の判定には使わない（Issue #32, #52）。
+ * ID が整数でない場合（どちらも未設定で undefined 同士になる場合など）は一致とみなさない。
+ * @param {{ sender?: { id?: number } } | null | undefined} event IPC のイベント
+ * @param {{ isDestroyed: () => boolean, webContents: { id?: number } } | null | undefined} win 期待するウィンドウ
+ * @returns {boolean} 送信元が win の画面なら true
+ */
+export function isSenderWindow(event, win) {
+  if (!win || win.isDestroyed()) return false;
+  const senderId = event?.sender?.id;
+  return Number.isInteger(senderId) && senderId === win.webContents?.id;
+}

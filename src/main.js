@@ -105,7 +105,8 @@ import {
   ProjectBS_Connection,
 } from "./main/RX_EEW.js";
 import { setOpenAtLogin_Linux } from "./main/linux.js";
-import { isTrustedLocalPage } from "./main/ipc_guard.js";
+import { isTrustedLocalPage, isSenderWindow } from "./main/ipc_guard.js";
+import { preserveVoiceParameter } from "./main/config_guard.js";
 import { registerTTSCommandIPC } from "./main/tts_ipc.js";
 
 import electron from "electron";
@@ -696,8 +697,15 @@ ipcMain.on("message", (event, response) => {
     case "openAtLogin":
       setOpenAtLogin(response.data);
       break;
-    case "ChangeConfig":
-      config = response.data;
+    case "ChangeConfig": {
+      //音声合成の設定（外部コマンドのテンプレートなど）は、設定画面からの変更だけを受け付ける（fork 独自。Issue #52）
+      const guarded = isSenderWindow(event, SettingWindow)
+        ? { config: response.data, changed: false }
+        : preserveVoiceParameter(response.data, config);
+      if (guarded.changed) {
+        console.warn(new Date().toLocaleString(), "[ChangeConfig]", "設定画面以外からの音声合成の設定の変更を無視しました:", event.senderFrame?.url);
+      }
+      config = guarded.config;
       store.set("config", config);
       state.config = config;
 
@@ -739,6 +747,7 @@ ipcMain.on("message", (event, response) => {
         });
       }
       break;
+    }
     case "EEWSimulation":
       EEW_Marge(response.data);
       break;
