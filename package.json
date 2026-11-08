@@ -14,12 +14,9 @@
   "build": {
     "productName": "Zero Quake",
     "files": [
-      "!CODE_OF_CONDUCT.md",
-      "!CONTRIBUTING.md",
-      "!SECURITY.md",
-      "!PULL_REQUEST_TEMPLATE.md",
-      "!tools/*",
-      "!eslint.config.js"
+      "src/**/*",
+      "LICENSE.md",
+      "THIRD-PARTY-LICENSES.txt"
     ],
     "win": {
       "icon": "src/img/icon.ico",
