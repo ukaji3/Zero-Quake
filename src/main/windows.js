@@ -68,6 +68,7 @@ import {
   KatsudoJokyoInfoAll,
 } from "./RX_JMAXML.js";
 import { update_data } from "./RX_OtherAPIs.js";
+import { isLinuxAutostartEnabled } from "./linux.js";
 
 export function CreateMainWindow() {
   try {
@@ -303,13 +304,22 @@ export function Create_SettingWindow(update) {
       }
 
       const homePath = String(app.getPath("home")).replace(/\\/g, "/");
+      // プラットフォームごとの自動起動状態チェック（Linux は fork 独自）
+      let isAutoStartEnabled = app.getLoginItemSettings().openAtLogin;
+      if (process.platform === "win32") {
+        // Windows の場合は追加でスタートアップフォルダもチェック
+        isAutoStartEnabled = isAutoStartEnabled
+          || fs.existsSync(`${homePath}/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/ZeroQuake.lnk`);
+      } else if (process.platform === "linux") {
+        // Linux (GNOME) の場合は autostart ディレクトリもチェック
+        isAutoStartEnabled = isAutoStartEnabled || isLinuxAutostartEnabled();
+      }
       SettingWindow.webContents.send("message2", {
         action: "initialData",
         config: config,
         defaultConfigVal: defaultConfigVal,
         softVersion: package_ver,
-        openAtLogin: app.getLoginItemSettings().openAtLogin
-          || fs.existsSync(`${homePath}/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/ZeroQuake.lnk`),
+        openAtLogin: isAutoStartEnabled,
         updatePanelMode: update,
       });
       if (update_data) {
@@ -682,10 +692,17 @@ export function PlayAudio(name) {
 //メインウィンドウ内通知
 export var notifyData = null;
 export function SystemNotification(message) {
+  // プラットフォームに応じたアイコンを選択し、Linux (GNOME) 向けの優先度・タイムアウトを指定する（fork 独自）
+  const iconPath = process.platform === "win32"
+    ? path.join(import.meta.dirname, "../img/icon.ico")
+    : path.join(import.meta.dirname, "../img/icon.png");
+
   var Push = new Notification({
     title: "Zero Quake システム通知",
     body: message,
-    icon: path.join(import.meta.dirname, "../img/icon.ico"),
+    icon: iconPath,
+    urgency: "normal", // Linux (GNOME) での通知の優先度
+    timeoutType: "default", // Linux での通知タイムアウト設定
   });
 
   Push.show();

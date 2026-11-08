@@ -1,6 +1,26 @@
 process.env.TZ = "Asia/Tokyo";
 process.title = 'Zero Quake';
 
+// Linux/Wayland でのトレイアイコン対応（fork 独自。Ubuntu 版）
+// Electron 39 + GNOME Shell 46 + Wayland の互換性問題への対処として導入した設定
+if (process.platform === 'linux') {
+  // GTK スケールファクターエラーを抑制
+  process.env.GDK_SCALE = process.env.GDK_SCALE || '1';
+  process.env.GDK_DPI_SCALE = process.env.GDK_DPI_SCALE || '1';
+
+  // Wayland での Electron の動作を改善
+  process.env.ELECTRON_OZONE_PLATFORM_HINT = 'auto';
+
+  // NSS 証明書エラーを抑制
+  process.env.NSS_SDB_USE_CACHE = 'no';
+
+  // AppIndicator プロトコルの問題を回避するため、Wayland セッションでは XWayland を使用する
+  // （StatusNotifierItem の代わりに従来の XEmbed トレイを試みる。GNOME Shell 拡張機能に依存する）
+  if (process.env.XDG_SESSION_TYPE === 'wayland') {
+    process.env.GDK_BACKEND = 'x11';
+  }
+}
+
 import {
   state,
   setStatusListener,
@@ -84,6 +104,7 @@ import {
   WolfxConnection,
   ProjectBS_Connection,
 } from "./main/RX_EEW.js";
+import { setOpenAtLogin_Linux } from "./main/linux.js";
 
 import electron from "electron";
 const { app, BrowserWindow, ipcMain, dialog, Menu } = electron;
@@ -103,6 +124,7 @@ if (DEBUG_MODE) {
   debugLog("Platform:", process.platform);
   debugLog("Session type:", process.env.XDG_SESSION_TYPE);
   debugLog("Current desktop:", process.env.XDG_CURRENT_DESKTOP);
+  debugLog("Ozone platform:", process.env.ELECTRON_OZONE_PLATFORM_HINT);
 }
 
 electron.protocol.registerSchemesAsPrivileged([
@@ -532,41 +554,88 @@ function errorResolve(response) {
 //アプリのロード完了イベント
 electron.app.on("ready", () => {
   //タスクトレイアイコン
-  tray = new electron.Tray(
-    // eslint-disable-next-line no-undef
-    path.join(import.meta.dirname, `/img/icon.${process.platform === "win32" ? "ico" : "png"}`)
-  );
-  tray.setToolTip("Zero Quake");
-  tray.setContextMenu(
-    electron.Menu.buildFromTemplate([
-      {
-        label: "メイン画面の表示",
-        click: () => {
-          CreateMainWindow();
-        },
+  const iconPath = path.join(import.meta.dirname, `/img/icon.${process.platform === "win32" ? "ico" : "png"}`);
+  debugLog("Tray: Creating tray icon. Icon path:", iconPath, "Platform:", process.platform);
+
+  try {
+    tray = new electron.Tray(iconPath);
+    tray.setToolTip("Zero Quake");
+
+    // Linux でのタイトル設定（一部の環境で必要）。fork 独自
+    if (process.platform === 'linux') {
+      try {
+        tray.setTitle("Zero Quake");
+      } catch (titleError) {
+        debugLog("Tray: setTitle failed (not critical):", titleError.message);
+      }
+    }
+    debugLog("Tray: Icon created. isDestroyed:", tray.isDestroyed());
+    // StatusNotifierItem 登録エラーは無視して続行（エラーが出てもトレイアイコンは表示される場合がある）
+  } catch (error) {
+    // GNOME Shell + Wayland などでトレイを作成できない場合は、トレイなしで続行する。fork 独自
+    console.error("[ERROR] Failed to create tray icon:", error);
+    debugLog("Tray creation failed. Workaround: use an X11 session instead of Wayland");
+    console.log("[INFO] Starting without system tray icon");
+    CreateMainWindow();
+    return;
+  }
+
+  // コンテキストメニューの作成
+  const contextMenu = electron.Menu.buildFromTemplate([
+    {
+      label: "メイン画面の表示",
+      click: () => {
+        debugLog("Tray: メイン画面の表示 clicked");
+        CreateMainWindow();
       },
-      {
-        label: "設定",
-        click: () => {
-          Create_SettingWindow();
-        },
+    },
+    {
+      label: "設定",
+      click: () => {
+        debugLog("Tray: 設定 clicked");
+        Create_SettingWindow();
       },
-      { type: "separator" },
-      {
-        label: "再起動",
-        click: () => {
-          app.relaunch();
-          app.exit(0);
-        },
+    },
+    { type: "separator" },
+    {
+      label: "再起動",
+      click: () => {
+        debugLog("Tray: 再起動 clicked");
+        app.relaunch();
+        app.exit(0);
       },
-      {
-        label: "終了",
-        click: () => {
-          app.exit(0);
-        },
+    },
+    {
+      label: "終了",
+      click: () => {
+        debugLog("Tray: 終了 clicked");
+        app.exit(0);
       },
-    ])
-  );
+    },
+  ]);
+  tray.setContextMenu(contextMenu);
+
+  // デバッグモード時はトレイのすべてのイベントを記録する（GNOME での挙動調査用）。fork 独自
+  if (DEBUG_MODE) {
+    const events = ['click', 'right-click', 'double-click', 'balloon-show', 'balloon-click', 'balloon-closed', 'drop', 'drop-files', 'drop-text', 'drag-enter', 'drag-leave', 'drag-end', 'mouse-enter', 'mouse-leave', 'mouse-move'];
+    events.forEach((eventName) => {
+      tray.on(eventName, (...args) => {
+        debugLog(`Tray: ${eventName} event fired!`, args);
+      });
+    });
+  }
+
+  // Linux 用: 左クリックと右クリックの両方でメニューを表示する。fork 独自
+  if (process.platform === 'linux') {
+    tray.on('click', () => {
+      tray.popUpContextMenu(contextMenu);
+    });
+    tray.on('right-click', () => {
+      tray.popUpContextMenu(contextMenu);
+    });
+  }
+
+  // ダブルクリックでメイン画面を表示
   tray.on("double-click", function () {
     CreateMainWindow();
   });
@@ -739,9 +808,9 @@ ipcMain.on("message", (_event, response) => {
 
 function setOpenAtLogin(openAtLogin) {
   // eslint-disable-next-line no-undef
-  if (process.platform != "win32") {
-    app.setLoginItemSettings({ openAtLogin: openAtLogin });
-  } else {
+  if (process.platform === "linux") {
+    setOpenAtLogin_Linux(openAtLogin);
+  } else if (process.platform == "win32") {
     app.setLoginItemSettings({ openAtLogin: false });
 
     const homePath = String(app.getPath("home")).replace(/\\/g, "/");
@@ -761,6 +830,9 @@ function setOpenAtLogin(openAtLogin) {
           return;
         });
     }
+  } else {
+    // macOS などその他のプラットフォーム
+    app.setLoginItemSettings({ openAtLogin: openAtLogin });
   }
 }
 
