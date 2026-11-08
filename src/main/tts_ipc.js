@@ -12,19 +12,10 @@ import { exec } from "child_process";
 import { config, debugLog } from "./state.js";
 import { WorkerWindow, SettingWindow } from "./windows.js";
 import { buildTTSCommand } from "./tts_command.js";
+import { isSenderWindow } from "./ipc_guard.js";
 
 /** テスト実行のタイムアウト（ミリ秒） */
 const TEST_TIMEOUT_MS = 10000;
-
-/**
- * IPC の送信元が、指定したウィンドウの画面かを判定する。
- * @param {Electron.IpcMainEvent | Electron.IpcMainInvokeEvent} event IPC のイベント
- * @param {Electron.BrowserWindow | null} win 期待するウィンドウ
- * @returns {boolean} 送信元が win の画面なら true
- */
-function isFromWindow(event, win) {
-  return Boolean(win && !win.isDestroyed() && event.sender && event.sender.id === win.webContents.id);
-}
 
 /**
  * 組み立てたコマンドを実行する。
@@ -51,7 +42,7 @@ function runCommand(command, options) {
  * @param {{ text?: unknown }} payload 読み上げ文字列
  */
 async function handleSpeak(event, payload) {
-  if (!isFromWindow(event, WorkerWindow)) {
+  if (!isSenderWindow(event, WorkerWindow)) {
     debugLog("tts:speak rejected: sender is not WorkerWindow");
     return;
   }
@@ -76,7 +67,7 @@ async function handleSpeak(event, payload) {
  * @returns {Promise<{ success: boolean, error: string | null, stdout: string, stderr: string }>} 実行結果
  */
 async function handleTest(event, payload) {
-  if (!isFromWindow(event, SettingWindow)) {
+  if (!isSenderWindow(event, SettingWindow)) {
     debugLog("tts:test rejected: sender is not SettingWindow");
     return { success: false, error: "許可されていない送信元です", stdout: "", stderr: "" };
   }
