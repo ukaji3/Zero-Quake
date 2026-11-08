@@ -46,6 +46,8 @@ export function pruneObjectByCount(obj, max, sortKey) {
 /**
  * 配列の保持件数を上限以下に刈り込む。
  * 上限超過分は sortKey の値が小さい（古い）ものから削除し、元の配列を in-place で更新する（要素の順序は保つ）。
+ * 同じ値が同じ大きさの場合は、配列の先頭に近いものを残す。
+ * 要素の同一性ではなく位置で判定するため、同じオブジェクトが複数回入っていても上限を超えない（Issue #36）。
  * @param {object[]} arr 対象配列
  * @param {number} max 最大保持件数
  * @param {(item: object) => number} sortKey 並び替えキー（大きいほど新しい）
@@ -53,12 +55,16 @@ export function pruneObjectByCount(obj, max, sortKey) {
  */
 export function pruneArrayByCount(arr, max, sortKey) {
   if (arr.length <= max) return 0;
-  var sorted = arr.slice().sort(function (a, b) { return sortKey(b) - sortKey(a); });
-  var keep = new Set(sorted.slice(0, max));
+  var keys = arr.map(sortKey);
+  var order = keys.map(function (_key, index) { return index; });
+  order.sort(function (a, b) { return (keys[b] - keys[a]) || (a - b); });
+  var keep = new Set(order.slice(0, Math.max(0, max)));
   var before = arr.length;
-  for (let i = arr.length - 1; i >= 0; i--) {
-    if (!keep.has(arr[i])) arr.splice(i, 1);
+  var write = 0;
+  for (let read = 0; read < arr.length; read++) {
+    if (keep.has(read)) arr[write++] = arr[read];
   }
+  arr.length = write;
   return before - arr.length;
 }
 
