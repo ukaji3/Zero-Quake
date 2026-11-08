@@ -516,6 +516,7 @@
                                 • <code>{rate}</code> - 速度 (0.1～10.0)<br>
                                 • <code>{pitch}</code> - ピッチ (0.0～2.0)<br>
                                 • <code>{volume}</code> - 音量 (0.0～1.0)<br>
+                                <code>{text}</code> の中身は、引用符の有無にかかわらずコマンドとして解釈されないよう自動でエスケープされます。<br>
                                 <br>
                                 <strong>推奨コマンド例：</strong><br>
                                 • <strong>espeak-ng</strong>: <code>espeak-ng -v ja -s {rate}00 -p {pitch}0 -a {volume}00 '{text}'</code><br>
