@@ -552,9 +552,12 @@ function errorResolve(response) {
   }
 }
 
-//アプリのロード完了イベント
-electron.app.on("ready", () => {
-  //タスクトレイアイコン
+/**
+ * タスクトレイのアイコンとメニューを作る。
+ * GNOME Shell + Wayland などで作成に失敗した場合は false を返す（fork 独自。Issue #34）。
+ * @returns {boolean} トレイを作成できたら true
+ */
+function setupTray() {
   const iconPath = path.join(import.meta.dirname, `/img/icon.${process.platform === "win32" ? "ico" : "png"}`);
   debugLog("Tray: Creating tray icon. Icon path:", iconPath, "Platform:", process.platform);
 
@@ -573,12 +576,9 @@ electron.app.on("ready", () => {
     debugLog("Tray: Icon created. isDestroyed:", tray.isDestroyed());
     // StatusNotifierItem 登録エラーは無視して続行（エラーが出てもトレイアイコンは表示される場合がある）
   } catch (error) {
-    // GNOME Shell + Wayland などでトレイを作成できない場合は、トレイなしで続行する。fork 独自
     console.error("[ERROR] Failed to create tray icon:", error);
     debugLog("Tray creation failed. Workaround: use an X11 session instead of Wayland");
-    console.log("[INFO] Starting without system tray icon");
-    CreateMainWindow();
-    return;
+    return false;
   }
 
   // コンテキストメニューの作成
@@ -640,6 +640,17 @@ electron.app.on("ready", () => {
   tray.on("double-click", function () {
     CreateMainWindow();
   });
+  return true;
+}
+
+//アプリのロード完了イベント
+electron.app.on("ready", () => {
+  //タスクトレイアイコン。作成できない場合はトレイなしでメイン画面を開いて続行する（fork 独自）
+  //失敗しても以降の処理（スリープ復帰時の再取得の登録）は必ず行う（Issue #34）
+  if (!setupTray()) {
+    console.log("[INFO] Starting without system tray icon");
+    CreateMainWindow();
+  }
 
   electron.powerMonitor.on("resume", () => {
     UpdateEQInfo_Loop();
