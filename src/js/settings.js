@@ -212,6 +212,8 @@ var pairs = [
   // 棒読みちゃん & 配色
   { target: prop(() => config.notice.voice_parameter, "Boyomi_Port"), element: document.getElementById("Boyomi_Port"), saveFunc: (v) => Math.floor(Number(v)) },
   { target: prop(() => config.notice.voice_parameter, "Boyomi_Voice"), element: document.getElementById("BoyomiVoiceSelect") },
+  // 外部コマンドによる音声合成（fork 独自）
+  { target: prop(() => config.notice.voice_parameter, "CustomCommand"), element: document.getElementById("CustomCommand"), loadFunc: (v) => v || "espeak-ng -v ja '{text}'" },
   { target: prop(() => config.color, "IntColorTheme"), element: document.getElementById("shindoColor") },
 ];
 
@@ -922,7 +924,24 @@ function speak(text, engine) {
     engine = document.querySelector('input[name="VoiceEngine"]:checked')?.value;
   }
 
-  if (engine == "Boyomichan") {
+  if (engine == "CustomCommand") {
+    // カスタムコマンドを使用した音声合成（fork 独自）
+    const command = document.getElementById("CustomCommand").value;
+    if (command) {
+      const replacedCommand = command
+        .replace(/{text}/g, text)
+        .replace(/{rate}/g, TTSspeed)
+        .replace(/{pitch}/g, TTSpitch)
+        .replace(/{volume}/g, TTSvolume);
+
+      window.electronAPI.send("message", {
+        action: "ExecuteTTSCommand",
+        command: replacedCommand
+      });
+    } else {
+      speak(text, "Default");
+    }
+  } else if (engine == "Boyomichan") {
     var port = document.getElementById("Boyomi_Port").value || config.notice.voice_parameter.Boyomi_Port || 50080;
     var host = `http://localhost:${port}`;
     if (document.getElementById("BoyomiVoiceSelect").value == "auto") {
@@ -1295,3 +1314,202 @@ var intColor = {
     },
   },
 };
+
+// ===== 音声合成エンジンごとの音声テスト機能（fork 独自） =====
+const TEST_TEXT = "音声テストです。緊急地震速報。強い揺れに警戒してください。";
+
+/**
+ * 音声テスト機能のログを出力する。
+ * @param {...unknown} args 出力内容
+ */
+function debugLog(...args) {
+  console.log('[TTS-TEST]', ...args);
+}
+
+debugLog('TTS test module loaded');
+
+/**
+ * 音声テストの結果を表示する。成功・失敗の表示は 5 秒後に消す。
+ * @param {string} engine 音声合成エンジン名（Default / Boyomichan / CustomCommand）
+ * @param {string} status 表示状態（testing / success / error）
+ * @param {string} message 表示する文言
+ */
+function showTestResult(engine, status, message) {
+  debugLog(`showTestResult called: engine=${engine}, status=${status}, message=${message}`);
+  const resultDiv = document.getElementById(`TestResult_${engine}`);
+  if (!resultDiv) {
+    debugLog(`Result div not found: TestResult_${engine}`);
+    return;
+  }
+
+  resultDiv.className = `test-result ${status}`;
+  resultDiv.textContent = message;
+  resultDiv.style.display = 'block';
+
+  if (status === 'success' || status === 'error') {
+    setTimeout(() => {
+      resultDiv.style.display = 'none';
+    }, 5000);
+  }
+}
+
+// OS標準音声のテスト
+const testDefaultButton = document.getElementById("TestTTS_Default");
+if (testDefaultButton) {
+  testDefaultButton.addEventListener("click", function () {
+    debugLog('TestTTS_Default button clicked');
+    const button = this;
+    button.disabled = true;
+    showTestResult('Default', 'testing', '🔄 テスト中...');
+
+    try {
+      if (!window.speechSynthesis) {
+        showTestResult('Default', 'error', '❌ Web Speech API が利用できません');
+        button.disabled = false;
+        return;
+      }
+
+      speechSynthesis.cancel();
+      const uttr = new SpeechSynthesisUtterance();
+      uttr.text = TEST_TEXT;
+      uttr.lang = "ja-JP";
+
+      if (TTSVoiceSelect.value && voices) {
+        const selectedVoice = voices.find(v => v.name === TTSVoiceSelect.value);
+        if (selectedVoice) {
+          uttr.voice = selectedVoice;
+        }
+      }
+
+      uttr.rate = TTSspeed;
+      uttr.pitch = TTSpitch;
+      uttr.volume = TTSvolume;
+
+      uttr.onstart = () => {
+        showTestResult('Default', 'testing', '🔊 再生中...');
+      };
+      uttr.onend = () => {
+        showTestResult('Default', 'success', '✅ テスト成功！音声が正常に再生されました');
+        button.disabled = false;
+      };
+      uttr.onerror = (event) => {
+        showTestResult('Default', 'error', `❌ エラー: ${event.error}`);
+        button.disabled = false;
+      };
+
+      speechSynthesis.speak(uttr);
+    } catch (error) {
+      debugLog('TestTTS_Default error:', error);
+      showTestResult('Default', 'error', `❌ エラー: ${error.message}`);
+      button.disabled = false;
+    }
+  });
+} else {
+  debugLog('ERROR: TestTTS_Default button not found in DOM!');
+}
+
+// 棒読みちゃんのテスト
+const testBoyomiButton = document.getElementById("TestTTS_Boyomichan");
+if (testBoyomiButton) {
+  testBoyomiButton.addEventListener("click", function () {
+    debugLog('TestTTS_Boyomichan button clicked');
+    const button = this;
+    button.disabled = true;
+    showTestResult('Boyomichan', 'testing', '🔄 テスト中...');
+
+    const port = document.getElementById("Boyomi_Port").value;
+    const host = `http://localhost:${port}`;
+
+    fetch(`${host}/Talk?text=${encodeURIComponent(TEST_TEXT)}&speed=${TTSspeed * 100}&volume=${TTSvolume * 100}&tone=${TTSpitch * 100}`)
+      .then(response => {
+        if (response.ok) {
+          showTestResult('Boyomichan', 'success', '✅ テスト成功！棒読みちゃんに接続できました');
+        } else {
+          showTestResult('Boyomichan', 'error', `❌ エラー: HTTP ${response.status}`);
+        }
+        button.disabled = false;
+      })
+      .catch(error => {
+        debugLog('TestTTS_Boyomichan fetch error:', error);
+        showTestResult('Boyomichan', 'error', `❌ 接続失敗: 棒読みちゃんが起動していないか、ポート番号が間違っています（ポート: ${port}）`);
+        button.disabled = false;
+      });
+  });
+} else {
+  debugLog('ERROR: TestTTS_Boyomichan button not found in DOM!');
+}
+
+// 外部コマンドのテスト
+const testCustomButton = document.getElementById("TestTTS_CustomCommand");
+if (testCustomButton) {
+  testCustomButton.addEventListener("click", function () {
+    debugLog('TestTTS_CustomCommand button clicked');
+    const button = this;
+    button.disabled = true;
+    showTestResult('CustomCommand', 'testing', '🔄 テスト中...');
+
+    const command = document.getElementById("CustomCommand").value;
+    debugLog('Command to test:', command);
+
+    if (!command || command.trim() === '') {
+      showTestResult('CustomCommand', 'error', '❌ コマンドが入力されていません');
+      button.disabled = false;
+      return;
+    }
+
+    // プレースホルダーを置換
+    const replacedCommand = command
+      .replace(/{text}/g, TEST_TEXT)
+      .replace(/{rate}/g, TTSspeed)
+      .replace(/{pitch}/g, TTSpitch)
+      .replace(/{volume}/g, TTSvolume);
+
+    if (!window.electronAPI || !window.electronAPI.send) {
+      debugLog('ERROR: electronAPI.send is not available');
+      showTestResult('CustomCommand', 'error', '❌ エラー: IPC通信が利用できません');
+      button.disabled = false;
+      return;
+    }
+
+    // メインプロセスにテストコマンドの実行を依頼する
+    debugLog('Sending TestTTSCommand to main process:', replacedCommand);
+    window.electronAPI.send("message", {
+      action: "TestTTSCommand",
+      command: replacedCommand
+    });
+
+    // 結果を待つ（タイムアウト付き）
+    let timeoutId = setTimeout(() => {
+      showTestResult('CustomCommand', 'error', '❌ タイムアウト: コマンドの実行に時間がかかりすぎています');
+      button.disabled = false;
+    }, 10000);
+
+    // 結果を受信するリスナーを一時的に追加する
+    const resultHandler = (_event, response) => {
+      if (response.action === "TestTTSCommandResult") {
+        debugLog('TestTTSCommandResult received:', response);
+        clearTimeout(timeoutId);
+
+        if (response.success) {
+          showTestResult('CustomCommand', 'success', '✅ テスト成功！コマンドが正常に実行されました');
+        } else {
+          const errorMsg = response.error || '不明なエラー';
+          showTestResult('CustomCommand', 'error', `❌ エラー: ${errorMsg}`);
+        }
+
+        button.disabled = false;
+        if (window.electronAPI && window.electronAPI.removeListener) {
+          window.electronAPI.removeListener("message2", resultHandler);
+        }
+      }
+    };
+
+    if (window.electronAPI && window.electronAPI.on) {
+      window.electronAPI.on("message2", resultHandler);
+    } else {
+      debugLog('ERROR: Cannot register result handler - electronAPI.on not available');
+    }
+  });
+} else {
+  debugLog('ERROR: TestTTS_CustomCommand button not found in DOM!');
+}

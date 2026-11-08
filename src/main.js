@@ -226,6 +226,7 @@ var defaultConfigVal = {
       engine: "Default",
       Boyomi_Port: 50080,
       Boyomi_Voice: "auto",
+      CustomCommand: "espeak-ng -v ja '{text}'", // Linux 用カスタムコマンド（fork 独自）
     },
     voice: {
       EEW: "{training2}緊急地震速報です。{region_name}で最大の震度、{maxInt}の地震が発生しました。[{location}の予想震度は{local_Int}です。]",
@@ -766,6 +767,42 @@ ipcMain.on("message", (_event, response) => {
       break;
     case "Request_wepa":
       Req_JMA_wepa();
+      break;
+    case "ExecuteTTSCommand":
+      // カスタムコマンドによる音声合成の実行（Linux 等。fork 独自）
+      if (response.command) {
+        exec(response.command, (error, stdout, stderr) => {
+          if (error) {
+            console.error(`TTS Command Error: ${error.message}`);
+            return;
+          }
+          if (stderr) {
+            console.error(`TTS Command stderr: ${stderr}`);
+          }
+        });
+      }
+      break;
+    case "TestTTSCommand":
+      // カスタムコマンドのテスト実行。結果を設定画面へ返す（fork 独自）
+      debugLog("TestTTSCommand received. Command:", response.command);
+      if (response.command) {
+        exec(response.command, { timeout: 10000 }, (error, stdout, stderr) => {
+          debugLog("TestTTSCommand completed. Error:", error, "Stdout:", stdout, "Stderr:", stderr);
+          if (SettingWindow) {
+            SettingWindow.webContents.send("message2", {
+              action: "TestTTSCommandResult",
+              success: !error,
+              error: error ? error.message : null,
+              stdout: stdout,
+              stderr: stderr
+            });
+          } else {
+            debugLog("SettingWindow is null, cannot send TestTTSCommandResult");
+          }
+        });
+      } else {
+        debugLog("No command provided in TestTTSCommand");
+      }
       break;
     case "Request_usgs":
       Req_USGS();

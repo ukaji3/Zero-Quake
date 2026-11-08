@@ -15,6 +15,61 @@
         body {
             background: #222225;
         }
+
+        /* 音声テストボタン・テスト結果表示のスタイル（fork 独自） */
+        .test-tts-button {
+            margin: 10px 0;
+            padding: 8px 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+
+        .test-tts-button:hover {
+            background: #45a049;
+        }
+
+        .test-tts-button:active {
+            background: #3d8b40;
+        }
+
+        .test-tts-button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+
+        .test-result {
+            margin: 10px 0;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            display: none;
+        }
+
+        .test-result.success {
+            display: block;
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid #4CAF50;
+            color: #4CAF50;
+        }
+
+        .test-result.error {
+            display: block;
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid #f44336;
+            color: #f44336;
+        }
+
+        .test-result.testing {
+            display: block;
+            background: rgba(33, 150, 243, 0.2);
+            border: 1px solid #2196F3;
+            color: #2196F3;
+        }
     </style>
 </head>
 
@@ -427,6 +482,8 @@
                                 OS標準音声：
                                 <select id="TTSvoiceSelect"></select>
                             </label>
+                            <button type="button" id="TestTTS_Default" class="test-tts-button">🔊 音声テスト</button>
+                            <div id="TestResult_Default" class="test-result"></div>
                         </div>
                     </section>
                     <section class="VoiceEngine_Wrap">
@@ -439,7 +496,35 @@
                                     <option selected value="auto">棒読みちゃんの設定に準拠</option>
                                 </select>
                             </label>
+                            <button type="button" id="TestTTS_Boyomichan" class="test-tts-button">🔊 音声テスト</button>
+                            <div id="TestResult_Boyomichan" class="test-result"></div>
                             <div class="smalltext">指定された音声が見つからない場合や、棒読みちゃん未起動時は、別の音声で読み上げます。「ポート番号」は、棒読みちゃんの設定値（通常は50080）にしてください。<a href="https://github.com/0Quake/Zero-Quake/wiki/%E9%9F%B3%E5%A3%B0%E5%90%88%E6%88%90%EF%BC%88%E8%AA%AD%E3%81%BF%E4%B8%8A%E3%81%92%EF%BC%89">詳細は説明ページを参照</a></div>
+                        </div>
+                    </section>
+                    <section class="VoiceEngine_Wrap">
+                        <label><input type="radio" name="VoiceEngine" id="VoiceEngine_CustomCommand" value="CustomCommand">外部コマンドを使用（Linux等）</label>
+                        <div class="VoiceSettingContent">
+                            <label>
+                                コマンド：
+                                <input type="text" id="CustomCommand" placeholder="espeak-ng -v ja '{text}'" style="width: 100%; font-family: monospace;">
+                            </label>
+                            <button type="button" id="TestTTS_CustomCommand" class="test-tts-button">🔊 音声テスト</button>
+                            <div id="TestResult_CustomCommand" class="test-result"></div>
+                            <div class="smalltext">
+                                <strong>使用可能なプレースホルダー：</strong><br>
+                                • <code>{text}</code> - 読み上げテキスト<br>
+                                • <code>{rate}</code> - 速度 (0.1～10.0)<br>
+                                • <code>{pitch}</code> - ピッチ (0.0～2.0)<br>
+                                • <code>{volume}</code> - 音量 (0.0～1.0)<br>
+                                <br>
+                                <strong>推奨コマンド例：</strong><br>
+                                • <strong>espeak-ng</strong>: <code>espeak-ng -v ja -s {rate}00 -p {pitch}0 -a {volume}00 '{text}'</code><br>
+                                • <strong>festival</strong>: <code>echo '{text}' | festival --tts</code><br>
+                                • <strong>pico2wave + aplay</strong>: <code>pico2wave -l ja-JP -w /tmp/tts.wav '{text}' && aplay /tmp/tts.wav</code><br>
+                                • <strong>spd-say</strong>: <code>spd-say -l ja -r {rate}0 -p {pitch}0 -i {volume}00 '{text}'</code><br>
+                                <br>
+                                <a href="https://github.com/0Quake/Zero-Quake/wiki/Linux%E3%81%A7%E3%81%AE%E9%9F%B3%E5%A3%B0%E5%90%88%E6%88%90" target="_blank">Linux での音声合成設定ガイド</a>
+                            </div>
                         </div>
                     </section>
 
