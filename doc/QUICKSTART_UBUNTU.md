@@ -21,8 +21,8 @@ cd dist
 ### 方法2: 手動インストール
 
 ```bash
-# deb パッケージをインストール
-sudo apt install ./dist/zeroquake_0.9.5_amd64.deb
+# deb パッケージをインストール（<バージョン> は dist/ にできた deb の版。例: 0.9.10）
+sudo apt install ./dist/zeroquake_<バージョン>_amd64.deb
 
 # システムトレイを使用する場合（オプション）
 sudo apt install libappindicator3-1 gnome-shell-extension-appindicator
@@ -32,11 +32,11 @@ gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com
 ### 方法3: AppImage（インストール不要）
 
 ```bash
-# 実行権限を付与
-chmod +x "dist/Zero Quake-0.9.5.AppImage"
+# 実行権限を付与（<バージョン> は dist/ にできた AppImage の版。例: 0.9.10）
+chmod +x "dist/Zero Quake-<バージョン>.AppImage"
 
 # 実行
-./dist/"Zero Quake-0.9.5.AppImage"
+./dist/"Zero Quake-<バージョン>.AppImage"
 ```
 
 ## 起動方法
