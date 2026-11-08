@@ -6,6 +6,7 @@ import { NankaiWindow, HokkaidoSanrikuWindow, KatsudoJokyoWindow, messageToMainW
 import { MargeEQInfo, EQCount_process } from "./PROC_EQInfo.js";
 import { ConvertTsunamiInfo, TsunamiValidate_bypass } from "./PROC_Tsunami.js";
 import { Req_NarikakunList } from "./RX_OtherAPIs.js";
+import { RETENTION_LIMITS, truncateOldest } from "./retention.js";
 
 import {
   config,
@@ -269,6 +270,7 @@ export function Process_Hokkaidosanriku(data) {
       var diff = Number(new Date(b.reportDate)) - Number(new Date(a.reportDate));
       return diff !== 0 ? diff : (Number(new Date(b.ControlDateTime || 0)) - Number(new Date(a.ControlDateTime || 0)));
     });
+  HokkaidoSanrikuInfoAll.splice(RETENTION_LIMITS.InfoAll);//新しい順に上限件数まで保持（fork 独自。Issue #24）
 
   messageToMainWindow({
     action: "HokkaidoSanrikuInfo",
@@ -305,6 +307,7 @@ export function Req_JMAXML(url, count) {
         return;
       }
       jmaXML_Fetched.push(url);
+      truncateOldest(jmaXML_Fetched, RETENTION_LIMITS.jmaXMLFetched);//取得済み URL の保持件数の上限（fork 独自。Issue #24 / #11）
 
       var cancel = (xml.getElementsByTagName("InfoType")[0]?.textContent || "").trim() == "取消";
 
@@ -519,6 +522,7 @@ export function Req_JMAXML(url, count) {
             var diff = Number(new Date(b.reportDate)) - Number(new Date(a.reportDate));
             return diff !== 0 ? diff : (Number(new Date(b.ControlDateTime || 0)) - Number(new Date(a.ControlDateTime || 0)));
           });
+        NankaiTroughInfoAll.splice(RETENTION_LIMITS.InfoAll);//新しい順に上限件数まで保持（fork 独自。Issue #24）
 
         var teirei;
         var latestRinji = NankaiTroughInfoAll.find(function (elm) {
@@ -981,6 +985,7 @@ export function Req_JMAXML(url, count) {
             var diff = Number(new Date(b.reportDate)) - Number(new Date(a.reportDate));
             return diff !== 0 ? diff : (Number(new Date(b.ControlDateTime || 0)) - Number(new Date(a.ControlDateTime || 0)));
           });
+        KatsudoJokyoInfoAll.splice(RETENTION_LIMITS.InfoAll);//新しい順に上限件数まで保持（fork 独自。Issue #24）
 
         messageToMainWindow({
           action: "KatsudoJokyoInfo",

@@ -7,6 +7,7 @@ import { calcInt, calc_arTime, getClosestNum, } from "./CALC_PSWave.js";
 import { TTT_JMA2001, TTT_AK135, JMA_Int_Points, NormalizeShindo, NormalizeDate, Boolean2, EEWSect, EQIAreaLoc, newDate2 } from "./constants.js";
 import { MainWindow, messageToMainWindow, PlayAudio, speak, CreateMainWindow } from "./windows.js";
 import { MargeEQInfo } from "./PROC_EQInfo.js";
+import { RETENTION_LIMITS, truncateOldest } from "./retention.js";
 
 
 import { config, Replay, UpdateStatus } from "./state.js";
@@ -443,6 +444,7 @@ export function EEW_Marge(data) {
         if (data.serial > MaxSerial) {
           //最新の報である
           SameEEW.data.push(data);//データ追加
+          truncateOldest(SameEEW.data, RETENTION_LIMITS.EEWStorageData);//保持報数の上限（fork 独自。Issue #24）
           if (data.is_cancel) {
             SameEEW.cancelled = true;
             SameEEW.data.forEach(function (d) {
@@ -462,6 +464,7 @@ export function EEW_Marge(data) {
         simulation: data.source == "simulation",
         data: [data],
       });
+      truncateOldest(EEW_Storage, RETENTION_LIMITS.EEWStorage);//保持イベント数の上限（fork 独自。Issue #24）
 
       EEW_Alert(data); //警報処理
     }
@@ -501,6 +504,7 @@ export function EarlyEst_Marge(data) {
           //第２報以降
           EarlyEst_Alert(data, false);
           SameEEW.data.push(data);
+          truncateOldest(SameEEW.data, RETENTION_LIMITS.EEWStorageData);//保持報数の上限（fork 独自。Issue #24）
           if (data.is_cancel) {
             SameEEW.cancelled = true;
           }
@@ -514,6 +518,7 @@ export function EarlyEst_Marge(data) {
         cancelled: false,
         data: [data],
       });
+      truncateOldest(EarlyEst_Data, RETENTION_LIMITS.EarlyEst);//保持イベント数の上限（fork 独自。Issue #24）
     }
   } catch (err) {
     throw new Error("Early-Est データの処理（マージ）に失敗しました。", { cause: err });

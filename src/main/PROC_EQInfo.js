@@ -1,7 +1,8 @@
 import { NormalizeShindo, Boolean2, NormalizeDate } from "./constants.js";
 import { messageToMainWindow, PlayAudio, speak, EQI_Window } from "./windows.js";
-import { config, Replay, JMA_CurrentInfoNumber, USGS_CurrentInfoNumber } from "./state.js";
+import { config, Replay, JMA_CurrentInfoNumber, USGS_CurrentInfoNumber, debugLog } from "./state.js";
 import { EEW_Storage } from "./PROC_EEW.js";
+import { RETENTION_LIMITS, pruneObjectByCount, pruneArrayByCount } from "./retention.js";
 
 export var eqInfo = { jma: [], usgs: [] };
 
@@ -191,11 +192,27 @@ export function MargeEQInfo(dataList, count) {
       }
     });
 
+    pruneEQInfo();//保持件数の上限（fork 独自。Issue #24）
+
     if (eqInfoTmp.length > 0) AlertEQInfo(eqInfoTmp, "jma", false);
     if (UpdateEQInfoTmp.length > 0) AlertEQInfo(UpdateEQInfoTmp, "jma", true);
   } catch (err) {
     throw new Error("地震情報データの処理（マージ）に失敗しました。", { cause: err });
   }
+}
+
+/**
+ * 地震情報の保持件数を上限以下に刈り込む。fork 独自（Issue #24）
+ * eqInfo.jma は表示件数の 2 倍（最低 RETENTION_LIMITS.eqInfoJmaMin）を保持する。
+ * EQInfoData の上限は eqInfo.jma の上限以上にする（eqInfo.jma に残るイベントの EQInfoData を消すと、
+ * 続報の受信時に新規イベントとして eqInfo.jma に重複登録されるため）。
+ */
+function pruneEQInfo() {
+  var jmaLimit = Math.max(JMA_CurrentInfoNumber * 2, RETENTION_LIMITS.eqInfoJmaMin);
+  var dataLimit = Math.max(RETENTION_LIMITS.EQInfoData, jmaLimit);
+  var removed = pruneObjectByCount(EQInfoData, dataLimit, function (e) { return Number(e.reportDateTime) || 0; });
+  removed += pruneArrayByCount(eqInfo.jma, jmaLimit, function (e) { return Number(e.DateForSort ?? e.reportDateTime) || 0; });
+  if (removed) debugLog(`EQInfo pruned: ${removed} items (EQInfoData=${Object.keys(EQInfoData).length}, eqInfo.jma=${eqInfo.jma.length})`);
 }
 
 
@@ -217,6 +234,7 @@ export function EQCount_process(data) {
       EQCount_data[data.eventId] = data;
     }
   }
+  pruneObjectByCount(EQCount_data, RETENTION_LIMITS.EQCount, function (e) { return Number(e.reportDateTime) || 0; });//保持件数の上限（fork 独自。Issue #24）
   var EQCount_data_array = Object.values(EQCount_data);
 
   EQCount_data_array = EQCount_data_array

@@ -1,6 +1,7 @@
 import { Boolean2, IncludesDuplicates, NormalizeDate } from "./constants.js";
 import { TsunamiWindow, CreateMainWindow, messageToMainWindow, PlayAudio, speak } from "./windows.js";
 import { config, Replay } from "./state.js";
+import { RETENTION_LIMITS, truncateOldest } from "./retention.js";
 
 export function resetTsunamiData() {
   Tsunami_Data = [];
@@ -113,6 +114,7 @@ export function ConvertTsunamiInfo(data) {
       }
     } else {
       Tsunami_Data.push(data);
+      truncateOldest(Tsunami_Data, RETENTION_LIMITS.Tsunami);//保持報数の上限（fork 独自。Issue #24）
 
       if (data.Torikeshi) {
         // 取消報の通知判定（最新の取消報であれば閾値に関わらず取消音声を再生）
