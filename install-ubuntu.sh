@@ -23,7 +23,19 @@ if [ "$EUID" -eq 0 ]; then
 fi
 
 # deb パッケージの検索
-DEB_FILE=$(ls zeroquake_*.deb 2>/dev/null | head -1)
+# 複数の版があるときは、sort -V で版が最も新しいものを選ぶ（0.9.9 より 0.9.10 を新しいとみなす）
+
+# カレントディレクトリにある zeroquake_*.deb を 1 行に 1 つ出力する（無ければ何も出力しない）
+list_debs() {
+    local file
+    for file in zeroquake_*.deb; do
+        [ -f "$file" ] && printf '%s\n' "$file"
+    done
+    return 0
+}
+
+DEB_FILE=$(list_debs | sort -V | tail -n 1)
+DEB_COUNT=$(list_debs | wc -l)
 
 if [ -z "$DEB_FILE" ]; then
     echo -e "${RED}エラー: zeroquake_*.deb ファイルが見つかりません${NC}"
@@ -34,6 +46,9 @@ if [ -z "$DEB_FILE" ]; then
 fi
 
 echo -e "${GREEN}✓${NC} deb パッケージを検出: $DEB_FILE"
+if [ "$DEB_COUNT" -gt 1 ]; then
+    echo -e "${YELLOW}注意${NC}: zeroquake_*.deb が ${DEB_COUNT} 個あるため、版が最も新しいものを使います"
+fi
 echo ""
 
 # 依存関係のチェック
