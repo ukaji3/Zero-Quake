@@ -89,9 +89,10 @@ function NormalizeShindo(str, responseType) {
       IntIndex = p2p_table[str]//p2pの2桁フォーマット
     } else if (isNaN(str)) {
       str = String(str)
-        .replace(/[０-９]/g, function (s) {
-          return String.fromCharCode(s.charCodeAt(0) - 0xfee0);
-        }).replaceAll("＋", "+").replaceAll("－", "-").replaceAll("強", "+").replaceAll("弱", "-").replace(/\s+/g, "");
+        .normalize("NFKC")
+        .replaceAll("強", "+")
+        .replaceAll("弱", "-")
+        .replace(/\s+/g, "");
       switch (str) {
         case "1":
           IntIndex = 1;
@@ -121,7 +122,7 @@ function NormalizeShindo(str, responseType) {
           IntIndex = 9;
           break;
         case "未":
-        case "５弱以上未入電":
+        case "5-以上未入電":
         case "震度5-以上未入電":
         case "5+?":
           IntIndex = 10;
@@ -188,13 +189,22 @@ function NormalizeShindo(str, responseType) {
 
 document.querySelectorAll("input[type=number]").forEach(function (elm) {
   elm.addEventListener("change", function () {
-    var max = this.getAttribute("max");
-    if (Number(max) < Number(this.value)) this.value = max;
-    var min = this.getAttribute("min");
-    if (Number(min) > Number(this.value)) this.value = min;
-    var step = this.getAttribute("step");
-    if (Number(this.value) % Number(step) !== 0) {
-      this.value = Math.floor(this.value / step) * step;
+    if (!elm?.value || isNaN(elm?.value)) {
+      elm.value = 0;
+      return;
+    }
+    var val = Number(this?.value);
+    if (elm.hasAttribute("max")) {
+      var max = Number(elm.getAttribute("max"));
+      if (!isNaN(max) && max < val) {
+        elm.value = max;
+      }
+    }
+    if (elm.hasAttribute("min")) {
+      var min = Number(elm.getAttribute("min"));
+      if (!isNaN(min) && min > val) {
+        elm.value = min;
+      }
     }
   });
 });
@@ -312,14 +322,6 @@ function NormalizeDate(type, date) {
   }
 }
 
-//子要素一括削除
-//eslint-disable-next-line
-function removeChild(element) {
-  while (element.firstChild) {
-    element.removeChild(element.firstChild);
-  }
-}
-
 //緯度経度フォーマット
 //eslint-disable-next-line
 function latitudeConvert(data) {
@@ -358,7 +360,7 @@ window.addEventListener("keydown", (event) => {
   else if (event.key == "ArrowLeft") moveFocus(-1, event);
   else if ((event.key == "Enter" || event.key == " ") && document.activeElement) {
     var tagname = document.activeElement.tagName;
-    if (tagname == "DIV" || tagname == "SPAN") document.activeElement.dispatchEvent(new PointerEvent("click"));
+    if (tagname == "DIV" || tagname == "SPAN") document.activeElement.click();
   }
 });
 function Boolean2(elm) {

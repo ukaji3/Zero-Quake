@@ -17,6 +17,8 @@ var eid;
 var ESmarkerElm;
 var newInfoDateTime = 0;
 var map;
+var mapReady = false;
+var pendingEQInfo = [];
 var config;
 var EQInfo = {
   originTime: null,
@@ -113,7 +115,7 @@ window.electronAPI.messageSend((event, request) => {
     if (request.axisData && Array.isArray(request.axisData))
       axisDatas = request.axisData;
 
-    if (request.eew && !request.eew.cancelled) {
+    if (request.eew) {
       var eewItem = request.eew.data[request.eew.data.length - 1];
 
       EEWData = {
@@ -128,13 +130,13 @@ window.electronAPI.messageSend((event, request) => {
         depth: eewItem.isPlum ? null : eewItem.depth,
         epiCenter: eewItem.region_name,
         comment: "",
-        cancel: false,
+        cancel: Boolean(request.eew.cancelled || eewItem.is_cancel),
         eew: true,
       };
     }
 
     if (!map) Mapinit();
-    else {
+    else if (mapReady) {
       document.getElementById("shindomap_radio").setAttribute("checked", true);
       estShindoMapDraw = false;
       ShindoMapDraw = true;
@@ -162,14 +164,25 @@ function InfoFetch() {
   estimated_intensity_mapReq();//処理重いので最後にかく
 }
 
-//地図初期化
+///地図初期化
 function Mapinit() {
   if (map) return;
-  const protocol = new pmtiles.Protocol();
-  maplibregl.addProtocol("pmtiles", protocol.tile);
-  const PMTILES_URL = "https://cyberjapandata.gsi.go.jp/xyz/optimal_bvmap-v1/optimal_bvmap-v1.pmtiles";
-  const p = new pmtiles.PMTiles(PMTILES_URL);
-  protocol.add(p);
+
+  initPMTilesProtocol();
+
+  const style = getCommonMapStyle(config, {
+    includeLgInt: true,
+    extraSources: {
+      estimated_intensity_map: {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: [],
+        },
+        tolerance: 0,
+      },
+    },
+  });
 
   map = new maplibregl.Map({
     container: "mapcontainer",
@@ -178,589 +191,7 @@ function Mapinit() {
     attributionControl: false,
     pitchWithRotate: false,
     dragRotate: false,
-    style: {
-      version: 8,
-      projection: { type: config?.data?.globeView ? "globe" : "mercator" },
-      glyphs: "https://gsi-cyberjapan.github.io/optimal_bvmap/glyphs/{fontstack}/{range}.pbf",
-      sources: {
-        submarine: {
-          type: "raster",
-          //tiles: ["./Resource/Submarine/{z}/{x}/{y}.jpg"],
-          url: "pmtiles://local-range-request://./src/Resource/background.pmtiles",
-          tileSize: 256,
-          attribution: "GEBCO, Peter Bird",
-          minzoom: 0,
-          maxzoom: 6,
-        },
-        v: {
-          type: "vector",
-          url: `pmtiles://${PMTILES_URL}`,
-          attribution: "国土地理院",
-          minzoom: 4,
-          maxzoom: 16,
-        },
-        worldmap: {
-          type: "vector",
-          url: "pmtiles://local-range-request://./src/Resource/world.pmtiles",
-          attribution: "Natural Earth",
-        },
-        basemap: {
-          type: "vector",
-          url: "pmtiles://local-range-request://./src/Resource/jp_sect.pmtiles",
-          attribution: "気象庁",
-        },
-        prefmap: {
-          type: "vector",
-          url: "pmtiles://local-range-request://./src/Resource/jp_pref.pmtiles",
-          attribution: "気象庁",
-        },
-        lake: {
-          type: "geojson",
-          data: "./Resource/lake.json",
-          tolerance: 1.7,
-          attribution: "国土数値情報",
-        },
-        estimated_intensity_map: {
-          type: "geojson",
-          data: {
-            type: "FeatureCollection",
-            features: [],
-          },
-          tolerance: 0,
-        },
-        tile0: {
-          type: "raster",
-          tiles: ["https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 2,
-          maxzoom: 18,
-        },
-        tile1: {
-          type: "raster",
-          tiles: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 2,
-          maxzoom: 18,
-        },
-        tile2: {
-          type: "raster",
-          tiles: [
-            "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg",
-          ],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 2,
-          maxzoom: 18,
-        },
-        tile4: {
-          type: "raster",
-          tiles: ["http://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          attribution: "OpenStreetMap contributors",
-          minzoom: 0,
-          maxzoom: 19,
-        },
-        over0: {
-          type: "raster",
-          tiles: [
-            "https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 2,
-          maxzoom: 16,
-        },
-        over1: {
-          type: "raster",
-          tiles: [
-            "https://cyberjapandata.gsi.go.jp/xyz/vbmd_colorrel/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 11,
-          maxzoom: 18,
-        },
-        over2: {
-          type: "raster",
-          tiles: [
-            "https://disaportaldata.gsi.go.jp/raster/04_tsunami_newlegend_data/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 7,
-          maxzoom: 12,
-        },
-        over3: {
-          type: "raster",
-          tiles: [
-            "https://disaportaldata.gsi.go.jp/raster/05_kyukeishakeikaikuiki/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 7,
-          maxzoom: 12,
-        },
-        over4: {
-          type: "raster",
-          tiles: [
-            "https://disaportaldata.gsi.go.jp/raster/05_jisuberikeikaikuiki/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 7,
-          maxzoom: 11,
-        },
-        over5: {
-          type: "raster",
-          tiles: [
-            "https://www.jma.go.jp/tile/jma/transparent-cities/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-          attribution: "気象庁",
-          minzoom: 2,
-          maxzoom: 11,
-        },
-        hinanjo: {
-          type: "raster",
-          tiles: [
-            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVQI12NgYAAAAAMAASDVlMcAAAAASUVORK5CYII=",
-          ],
-          attribution: "国土地理院",
-          minzoom: 10,
-          maxzoom: 10,
-        },
-      },
-      layers: [
-        {
-          id: "submarine",
-          type: "raster",
-          source: "submarine",
-          layout: { visibility: high_contrast ? "none" : "visible" },
-        },
-        {
-          id: "tile0",
-          type: "raster",
-          source: "tile0",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "tile1",
-          type: "raster",
-          source: "tile1",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "tile2",
-          type: "raster",
-          source: "tile2",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "tile4",
-          type: "raster",
-          source: "tile4",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "prefmap_fill",
-          type: "fill",
-          source: "prefmap",
-          "source-layer": "jp_pref",
-          paint: {
-            "fill-color": high_contrast ? "#000" : "#333",
-            "fill-opacity": 1,
-          },
-        },
-        {
-          id: "basemap_LINE",
-          type: "line",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          minzoom: 6,
-          paint: {
-            "line-color": high_contrast ? "#FFF" : "#666",
-            "line-width": 1,
-          },
-        },
-        {
-          id: "over0",
-          type: "raster",
-          source: "over0",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "over1",
-          type: "raster",
-          source: "over1",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "over2",
-          type: "raster",
-          source: "over2",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "over3",
-          type: "raster",
-          source: "over3",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "over4",
-          type: "raster",
-          source: "over4",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "over5",
-          type: "raster",
-          source: "over5",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "Int0",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["0"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int1",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["1"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int2",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["2"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int3",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["3"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int4",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["4"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int5-",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["5m"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int5+",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["5p"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int6-",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["6m"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int6+",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["6p"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int7",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["7"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "LgInt1",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.LgInt["1"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "LgInt2",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.LgInt["2"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "LgInt3",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.LgInt["3"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "LgInt4",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.LgInt["4"].background },
-          filter: ["==", "name", ""],
-        },
-
-        {
-          id: "prefmap_LINE",
-          type: "line",
-          source: "prefmap",
-          "source-layer": "jp_pref",
-          paint: {
-            "line-color": high_contrast ? "#FFF" : "#999",
-            "line-width": 1,
-          },
-        },
-        {
-          id: "worldmap_fill",
-          type: "fill",
-          source: "worldmap",
-          "source-layer": "world",
-          paint: {
-            "fill-color": high_contrast ? "#000" : "#333",
-            "fill-opacity": 1,
-          },
-        },
-        {
-          id: "worldmap_LINE",
-          type: "line",
-          source: "worldmap",
-          "source-layer": "world",
-          paint: {
-            "line-color": high_contrast ? "#FFF" : "#999",
-            "line-width": 1,
-          },
-        },
-        {
-          id: "lake_fill",
-          type: "fill",
-          source: "lake",
-          paint: {
-            "fill-color": high_contrast ? "#FFF" : "#325385",
-            "fill-opacity": high_contrast ? 1 : 0.5,
-          },
-          minzoom: 6,
-        },
-        {
-          id: "河川中心線",
-          type: "line",
-          source: "v",
-          "source-layer": "RvrCL",
-          filter: ["!", ["in", ["get", "vt_code"], ["literal", [5302, 5322]]]],
-          paint: { "line-color": "#2468cb66", "line-width": 2 },
-          layout: { visibility: "none" },
-        },
-        {
-          id: "水涯線",
-          type: "line",
-          source: "v",
-          "source-layer": "WL",
-          paint: { "line-color": "#2468cb66", "line-width": 2 },
-          layout: { visibility: "none" },
-        },
-        {
-          id: "道路中心線ZL4-10国道・高速",
-          maxzoom: 11,
-          minzoom: 9,
-          type: "line",
-          source: "v",
-          "source-layer": "RdCL",
-          filter: ["any", ["in", ["get", "vt_rdctg"], ["literal", ["主要道路", "国道", "都道府県道", "市区町村道等"]],], ["==", ["get", "vt_rdctg"], "高速自動車国道等"],],
-          layout: {
-            "line-cap": "round",
-            "line-join": "round",
-            "line-sort-key": ["get", "vt_drworder"],
-            visibility: "none",
-          },
-          paint: { "line-color": "#80808066", "line-width": 3 },
-        },
-        {
-          id: "道路中心線色0",
-          minzoom: 11,
-          maxzoom: 17,
-          type: "line",
-          source: "v",
-          "source-layer": "RdCL",
-          filter: ["any", ["step", ["zoom"], ["all", ["==", ["get", "vt_lvorder"], 0], ["!", ["in", ["get", "vt_code"], ["literal", [2703, 2713, 2723, 2733, 2724, 2734]],],],], 17, ["all", ["in", ["get", "vt_flag17"], ["literal", [1, 2]]], ["!", ["in", ["get", "vt_code"], ["literal", [2724, 2734]]]],],], ["all", ["==", ["get", "vt_lvorder"], 0], ["in", ["get", "vt_code"], ["literal", [2703, 2713, 2723, 2733]]],],],
-          layout: {
-            "line-join": "round",
-            "line-round-limit": 1.57,
-            "line-sort-key": ["get", "vt_drworder"],
-            visibility: "none",
-          },
-          paint: { "line-color": "#80808066", "line-width": 2 },
-        },
-        {
-          id: "鉄道中心線",
-          minzoom: 11,
-          maxzoom: 17,
-          type: "line",
-          source: "v",
-          "source-layer": "RailCL",
-          filter: ["any", ["all", ["!", ["in", ["get", "vt_railstate"], ["literal", ["トンネル", "雪覆い", "地下", "橋・高架"]],],], ["==", ["get", "vt_lvorder"], 0],], ["all", ["==", ["get", "vt_railstate"], "橋・高架"], ["==", ["get", "vt_lvorder"], 0],], ["all", ["!", ["in", ["get", "vt_railstate"], ["literal", ["トンネル", "雪覆い", "地下", "橋・高架"]],],], ["==", ["get", "vt_lvorder"], 1],],],
-          paint: {
-            "line-color": "#80808066",
-            "line-width": 2.5,
-            "line-dasharray": [1, 1],
-          },
-          layout: { visibility: "none" },
-        },
-        {
-          id: "建築物0",
-          type: "fill",
-          source: "v",
-          "source-layer": "BldA",
-          filter: ["==", ["get", "vt_lvorder"], 0],
-          paint: { "fill-color": "#80808033" },
-          layout: { visibility: "none" },
-        },
-        {
-          id: "道路中心線色1",
-          minzoom: 11,
-          maxzoom: 17,
-          type: "line",
-          source: "v",
-          "source-layer": "RdCL",
-          filter: ["all", ["==", ["get", "vt_lvorder"], 1], ["!", ["in", ["get", "vt_code"], ["literal", [2703, 2713, 2723, 2733, 2724, 2734]],],],],
-          layout: {
-            visibility: "none",
-            "line-join": "round",
-            "line-round-limit": 1.57,
-            "line-sort-key": ["get", "vt_drworder"],
-          },
-          paint: {
-            "line-color": "#80808066",
-            "line-width": 4,
-            "line-dasharray": [1, 1],
-          },
-        },
-        {
-          id: "道路中心線色橋1",
-          minzoom: 11,
-          maxzoom: 17,
-          type: "line",
-          source: "v",
-          "source-layer": "RdCL",
-          filter: ["all", ["==", ["get", "vt_lvorder"], 1], ["in", ["get", "vt_code"], ["literal", [2703, 2713, 2723, 2733]]],],
-          layout: {
-            "line-join": "round",
-            "line-round-limit": 1.57,
-            "line-sort-key": ["get", "vt_drworder"],
-            visibility: "none",
-          },
-          paint: { "line-color": "#80808066", "line-width": 1.5 },
-        },
-        {
-          id: "道路縁",
-          minzoom: 17,
-          type: "line",
-          source: "v",
-          "source-layer": "RdEdg",
-          layout: {
-            "line-cap": "square",
-            "line-sort-key": ["get", "vt_drworder"],
-            visibility: "none",
-          },
-          paint: { "line-color": "#80808066", "line-width": 1.5 },
-        },
-        {
-          id: "行政区画界線25000市区町村界",
-          type: "line",
-          source: "v",
-          "source-layer": "AdmBdry",
-          filter: ["==", ["get", "vt_code"], 1212],
-          layout: { "line-cap": "square", visibility: "none" },
-          paint: { "line-color": "#666666", "line-width": 1 },
-        },
-        {
-          id: "hinanjo",
-          type: "raster",
-          source: "hinanjo",
-          layout: { visibility: "none" },
-          minzoom: 10,
-        },
-        {
-          id: "注記シンボル付きソート順100以上",
-          type: "symbol",
-          source: "v",
-          "source-layer": "Anno",
-          filter: ["step", ["zoom"], ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_code"], ["literal", [653, 661, 662, 3201, 3202, 3203, 3204, 3211, 3215, 3216, 3217, 3218, 3231, 3232, 3242, 3243, 3244, 3261, 4101, 4102, 4103, 4104, 4105, 6301, 6311, 6312, 6313, 6314, 6321, 6322, 6323, 6324, 6325, 6326, 6327, 6332, 6342, 6351, 6362, 7101, 7102, 7103, 7711, 8103, 8105,],],],], 16, ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_flag17"], ["literal", [0, 1]]], ["in", ["get", "vt_code"], ["literal", [653, 661, 662, 3201, 3202, 3203, 3204, 3211, 3215, 3216, 3217, 3218, 3231, 3232, 3242, 3243, 3244, 3261, 4101, 4102, 4103, 4104, 4105, 6301, 6311, 6312, 6313, 6314, 6321, 6322, 6323, 6324, 6325, 6326, 6327, 6332, 6342, 6351, 6362, 7101, 7102, 7103, 7711, 8103, 8105,],],],], 17, ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_flag17"], ["literal", [1, 2]]], ["in", ["get", "vt_code"], ["literal", [653, 661, 662, 3201, 3202, 3203, 3204, 3211, 3215, 3216, 3217, 3218, 3231, 3232, 3242, 3243, 3244, 3261, 4101, 4102, 4103, 4104, 4105, 6301, 6311, 6312, 6313, 6314, 6321, 6322, 6323, 6324, 6325, 6326, 6327, 6332, 6342, 6351, 6362, 7101, 7102, 7103, 7711, 8103, 8105,],],],],],
-          layout: {
-            visibility: "none",
-            "text-allow-overlap": false,
-            "text-font": ["match", ["get", "vt_code"], [321, 322, 341, 342, 344, 345, 347, 820, 840, 841, 842], ["literal", ["NotoSerifJP-SemiBold"]], ["literal", ["NotoSansJP-Regular"]],],
-            "text-justify": "auto",
-            "text-size": ["let", "size", ["match", ["get", "vt_code"], [361, 1403, 7101, 7102, 7103, 7201, 7221], 10, [334, 730], 11, [312, 313, 314, 315, 316, 322, 323, 332, 342, 353, 412, 533, 621, 631, 632, 633, 634, 653, 654, 720, 999, 2941, 2942, 2943, 2944, 2945,], 12, [343, 1402, 7711], 13, [311, 346, 347, 413, 422, 1303], 14, [210, 220, 321, 331, 352, 411, 421, 423, 431, 432, 441, 511, 521, 522, 523, 531, 532, 534, 611, 612, 613, 615, 651, 661, 662, 671, 672, 673, 681, 1302,], 15, [130, 1301, 1401], 16, [140, 333, 351], 18, [110, 120, 341, 344, 345], 20, [348, 800, 810, 820, 822, 830, 831, 832, 833, 840, 841, 842, 843, 850, 860, 870, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 899,], 24, 10,], ["interpolate", ["linear"], ["zoom"], 4, ["*", 0.6, ["var", "size"]], 8, ["var", "size"], 11, ["match", ["get", "vt_code"], [1401, 1402, 1403], 20, 422, ["*", 0.7, ["var", "size"]], ["var", "size"],], 12, ["var", "size"], 14, ["var", "size"], 17, ["match", ["get", "vt_code"], [412, 422], ["*", 2, ["var", "size"]], ["var", "size"],],],],
-            "text-field": ["get", "vt_text"],
-            "text-max-width": 100,
-            "text-radial-offset": 0.5,
-            "text-variable-anchor": ["top", "bottom", "left", "right"],
-            "text-writing-mode": ["horizontal"],
-          },
-          paint: {
-            "text-color": ["let", "color", ["match", ["get", "vt_code"], 521, "rgba(80,80,80,1)", 348, "rgba(150,150,150,1)", [411, 412, 413, 421, 422, 423, 431, 432, 441, 860, 2941, 2942, 2943, 2944, 2945,], "rgba(230,230,230,1)", [7372, 7711], "rgba(80,80,80,1)", 7352, "rgba(50,50,50,1)", [2901, 2903, 2904], "rgba(255,255,255,1)", [321, 322, 341, 344, 345, 820, 840, 841], "rgba(80,80,80,1)", 220, "rgba(150,150,150,1)", 312, "rgba(150,150,150,1)", [333, 346], "rgba(150,150,150,1)", [511, 522, 523, 531, 532, 534, 611, 612, 613, 614, 615, 621, 623, 631, 632, 633, 634, 641, 642, 651, 652, 653, 654, 661, 662, 671, 672, 673, 681, 720, 730, 870, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 899, 999, 3201, 3202, 3203, 3204, 3205, 3206, 3211, 3212, 3213, 3214, 3215, 3216, 3217, 3218, 3221, 3231, 3232, 3241, 3242, 3243, 3244,], "rgba(150,150,150,1)", "rgba(200,200,200,1)",], ["step", ["zoom"], ["match", ["get", "vt_code"], [661, 662], "rgba(200,200,200,0)", ["var", "color"],], 14, ["match", ["get", "vt_code"], [3201, 3204, 3215, 3216, 3217, 3218, 3243], "rgba(200,200,200,0)", ["var", "color"],],],],
-            "text-halo-color": ["step", ["zoom"], ["match", ["get", "vt_code"], [661, 662], "rgba(50,50,50,0)", "rgba(50,50,50,1)",], 14, ["match", ["get", "vt_code"], [3201, 3204, 3215, 3216, 3217, 3218, 3243], "rgba(50,50,50,0)", "rgba(50,50,50,1)",],],
-            "text-halo-width": 1,
-          },
-        },
-        {
-          id: "注記シンボル付きソート順100未満",
-          type: "symbol",
-          source: "v",
-          "source-layer": "Anno",
-          filter: ["step", ["zoom"], ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_code"], ["literal", [621, 631, 632, 633, 1301, 1302, 1303, 1401, 1402, 1403, 2941, 2942, 2945, 3205, 3206, 3212, 3213, 3214, 3221, 3241, 6331, 6361, 6367, 6368, 6371, 6373, 6375, 6376, 6381, 7201, 7221,],],],], 16, ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_flag17"], ["literal", [0, 1]]], ["in", ["get", "vt_code"], ["literal", [621, 631, 632, 633, 1301, 1302, 1303, 1401, 1402, 1403, 2941, 2942, 2945, 3205, 3206, 3212, 3213, 3214, 3221, 3241, 6331, 6361, 6367, 6368, 6371, 6373, 6375, 6376, 6381, 7201, 7221,],],],], 17, ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_flag17"], ["literal", [1, 2]]], ["in", ["get", "vt_code"], ["literal", [621, 631, 632, 633, 1301, 1302, 1303, 1401, 1402, 1403, 2941, 2942, 2945, 3205, 3206, 3212, 3213, 3214, 3221, 3241, 6331, 6361, 6367, 6368, 6371, 6373, 6375, 6376, 6381, 7201, 7221,],],],],],
-          layout: {
-            visibility: "none",
-            "text-allow-overlap": false,
-            "text-font": ["match", ["get", "vt_code"], [321, 322, 341, 342, 344, 345, 347, 820, 840, 841, 842], ["literal", ["NotoSerifJP-SemiBold"]], ["literal", ["NotoSansJP-Regular"]],],
-            "text-justify": "auto",
-            "text-size": ["let", "size", ["match", ["get", "vt_code"], [361, 1403, 7101, 7102, 7103, 7201, 7221], 10, [334, 730], 11, [312, 313, 314, 315, 316, 322, 323, 332, 342, 353, 412, 533, 621, 631, 632, 633, 634, 653, 654, 720, 999, 2941, 2942, 2943, 2944, 2945,], 12, [343, 1402, 7711], 13, [311, 346, 347, 413, 422, 1303], 14, [210, 220, 321, 331, 352, 411, 421, 423, 431, 432, 441, 511, 521, 522, 523, 531, 532, 534, 611, 612, 613, 615, 651, 661, 662, 671, 672, 673, 681, 1302,], 15, [130, 1301, 1401], 16, [140, 333, 351], 18, [110, 120, 341, 344, 345], 20, [348, 800, 810, 820, 822, 830, 831, 832, 833, 840, 841, 842, 843, 850, 860, 870, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 899,], 24, 10,], ["interpolate", ["linear"], ["zoom"], 4, ["*", 0.6, ["var", "size"]], 8, ["var", "size"], 11, ["match", ["get", "vt_code"], [1401, 1402, 1403], 20, 422, ["*", 0.7, ["var", "size"]], ["var", "size"],], 12, ["var", "size"], 14, ["match", ["get", "vt_code"], [2941, 2942], ["*", 1.3, ["var", "size"]], ["var", "size"],], 17, ["match", ["get", "vt_code"], [412, 422], ["*", 2, ["var", "size"]], ["var", "size"],],],],
-            "text-field": ["get", "vt_text"],
-            "text-max-width": 100,
-            "text-radial-offset": 0.5,
-            "text-variable-anchor": ["top", "bottom", "left", "right"],
-            "text-writing-mode": ["horizontal"],
-          },
-          paint: {
-            "text-color": ["let", "color", ["match", ["get", "vt_code"], 521, "rgba(80,80,80,1)", 348, "rgba(150,150,150,1)", [411, 412, 413, 421, 422, 423, 431, 432, 441, 860, 2941, 2942, 2943, 2944, 2945,], "rgba(230,230,230,1)", [7372, 7711], "rgba(80,80,80,1)", 7352, "rgba(50,50,50,1)", [2901, 2903, 2904], "rgba(255,255,255,1)", [321, 322, 341, 344, 345, 820, 840, 841], "rgba(80,80,80,1)", 220, "rgba(150,150,150,1)", 312, "rgba(150,150,150,1)", [333, 346], "rgba(150,150,150,1)", [511, 522, 523, 531, 532, 534, 611, 612, 613, 614, 615, 621, 623, 631, 632, 633, 634, 641, 642, 651, 652, 653, 654, 661, 662, 671, 672, 673, 681, 720, 730, 870, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 899, 999, 3201, 3202, 3203, 3204, 3205, 3206, 3211, 3212, 3213, 3214, 3215, 3216, 3217, 3218, 3221, 3231, 3232, 3241, 3242, 3243, 3244,], "rgba(150,150,150,1)", "rgba(200,200,200,1)",], ["step", ["zoom"], ["match", ["get", "vt_code"], [631, 632, 633, 6368, 6376], "rgba(200,200,200,0)", ["var", "color"],], 14, ["match", ["get", "vt_code"], [3212, 3213, 3214], "rgba(200,200,200,0)", ["var", "color"],],],],
-            "text-halo-color": ["step", ["zoom"], ["match", ["get", "vt_code"], [631, 632, 633, 6368, 6376], "rgba(50,50,50,0)", "rgba(50,50,50,1)",], 14, ["match", ["get", "vt_code"], [3212, 3213, 3214], "rgba(50,50,50,0)", "rgba(50,50,50,1)",],],
-            "text-halo-width": 1,
-          },
-        },
-      ],
-    },
+    style: style,
   });
   map.addControl(
     new maplibregl.AttributionControl({ compact: true, }),
@@ -770,63 +201,7 @@ function Mapinit() {
   map.touchZoomRotate.disableRotation();
   ZoomBounds = new maplibregl.LngLatBounds();
 
-  map.on("sourcedataloading", (e) => {
-    var hinanjoShow = config.data.overlay.includes("hinanjo");
-    if (e.sourceId == "hinanjo" && hinanjoShow && e.tile != undefined) {
-      var ca = e.tile.tileID.canonical;
-
-      var eq_name = `hinanjo_eq_${ca.x}${ca.y}${ca.z}`;
-      var ts_name = `hinanjo_ts_${ca.x}${ca.y}${ca.z}`;
-      if (map.getLayer(eq_name)) map.removeLayer(eq_name);
-      if (map.getSource(eq_name)) map.removeSource(eq_name);
-      if (map.getLayer(ts_name)) map.removeLayer(ts_name);
-      if (map.getSource(ts_name)) map.removeSource(ts_name);
-
-      map.addSource(eq_name, {
-        type: "geojson",
-        data: `https://cyberjapandata.gsi.go.jp/xyz/skhb04/${ca.z}/${ca.x}/${ca.y}.geojson`,
-      });
-
-      map.addLayer({
-        id: eq_name,
-        type: "circle",
-        source: eq_name,
-        layout: { visibility: hinanjoShow ? "visible" : "none" },
-        paint: {
-          "circle-color": "#bf8715",
-          "circle-radius": 6,
-          "circle-stroke-width": 1,
-          "circle-stroke-color": "#222",
-        },
-        minzoom: 10,
-        maxzoom: 22,
-      });
-
-      map.addSource(ts_name, {
-        type: "geojson",
-        data: `https://cyberjapandata.gsi.go.jp/xyz/skhb05/${ca.z}/${ca.x}/${ca.y}.geojson`,
-      });
-
-      map.addLayer({
-        id: ts_name,
-        type: "circle",
-        source: ts_name,
-        layout: { visibility: hinanjoShow ? "visible" : "none" },
-        paint: {
-          "circle-color": "#2488c7",
-          "circle-radius": 6,
-          "circle-stroke-width": 1,
-          "circle-stroke-color": "#222",
-        },
-        minzoom: 10,
-        maxzoom: 22,
-      });
-
-      map.on("click", eq_name, hinanjoPopup);
-      map.on("click", ts_name, hinanjoPopup);
-      hinanjoLayers.push(eq_name, ts_name);
-    }
-  });
+  setupHinanjoLoader(map, config, hinanjoLayers, hinanjoPopup);
 
   hinanjoCheck.addEventListener("change", function () {
     if (!map) return;
@@ -1066,6 +441,10 @@ function Mapinit() {
 }
 
 function drawData() {
+  mapReady = true;
+  var pending = pendingEQInfo;
+  pendingEQInfo = [];
+  pending.forEach(ConvertEQInfo);
   mapFillSwitch();
   layerSelect(config.data.layer);
   radioSet("mapSelect", config.data.layer);
@@ -1096,7 +475,7 @@ function Int_Area_Popup(e) {
     .setLngLat(e.features[0].geometry.coordinates)
     .addTo(map);
 
-  e.originalEvent.cancelBubble = true;
+  e.originalEvent?.stopPropagation();
 }
 
 function Int_Sta_Popup(e) {
@@ -1117,7 +496,7 @@ function Int_Sta_Popup(e) {
     .setLngLat(e.features[0].geometry.coordinates)
     .addTo(map);
 
-  if (e.originalEvent) e.originalEvent.cancelBubble = true;
+  if (e.originalEvent) e.originalEvent?.stopPropagation();
 }
 function LgInt_Area_Popup(e) {
   var elm = e.features[0].properties;
@@ -1136,7 +515,7 @@ function LgInt_Area_Popup(e) {
     .setLngLat(e.features[0].geometry.coordinates)
     .addTo(map);
 
-  e.originalEvent.cancelBubble = true;
+  e.originalEvent?.stopPropagation();
 }
 
 function LgInt_Sta_Popup(e) {
@@ -1156,16 +535,12 @@ function LgInt_Sta_Popup(e) {
     .setLngLat(e.features[0].geometry.coordinates)
     .addTo(map);
 
-  if (e.originalEvent) e.originalEvent.cancelBubble = true;
+  if (e.originalEvent) e.originalEvent?.stopPropagation();
 }
 
 function roundedRect(ctx, x, y, width, height, radius) {
   ctx.beginPath();
-  ctx.moveTo(x, y + radius);
-  ctx.arcTo(x, y + height, x + radius, y + height, radius);
-  ctx.arcTo(x + width, y + height, x + width, y + height - radius, radius);
-  ctx.arcTo(x + width, y, x + width - radius, y, radius);
-  ctx.arcTo(x, y, x, y + radius, radius);
+  ctx.roundRect(x, y, width, height, radius);
   ctx.stroke();
 }
 function _ellipse(ctx, x, y, width, height) {
@@ -1281,29 +656,44 @@ function overlaySelect(layerName, checked) {
   if (layerName == "kmoni_points") return;
   if (!map) return;
   var visibility = checked ? "visible" : "none";
-  if (layerName !== "hinanjo" && layerName !== "kmoni_points") {
-    if (layerName == "gsi_vector") {
-      ["河川中心線", "水涯線", "道路中心線ZL4-10国道・高速", "道路中心線色0", "鉄道中心線", "建築物0", "道路中心線色1", "道路中心線色橋1", "道路縁", "行政区画界線25000市区町村界", "注記シンボル付きソート順100以上", "注記シンボル付きソート順100未満",]
-        .forEach(function (elm) {
-          map.setLayoutProperty(elm, "visibility", visibility);
-        });
-    } else {
-      map.setLayoutProperty(layerName, "visibility", visibility);
-    }
+  if (layerName == "gsi_vector") {
+    [
+      "河川中心線",
+      "水涯線",
+      "道路中心線ZL4-10国道・高速",
+      "道路中心線色0",
+      "鉄道中心線",
+      "建築物0",
+      "道路中心線色1",
+      "道路中心線色橋1",
+      "道路縁",
+      "行政区画界線25000市区町村界",
+      "注記シンボル付きソート順100以上",
+      "注記シンボル付きソート順100未満",
+    ].forEach(function (elm) {
+      map.setLayoutProperty(elm, "visibility", visibility);
+    });
+  } else if (layerName == "hinanjo") {
+    map.setLayoutProperty("hinanjo", "visibility", visibility);
+    hinanjoLayers.forEach(function (elm) {
+      map.setLayoutProperty(elm, "visibility", visibility);
+    });
+  } else {
+    map.setLayoutProperty(layerName, "visibility", visibility);
+  }
 
-    if (layerName == "over2")
-      document.getElementById("legend1").style.display = checked ? "inline-block" : "none";
-    else if (layerName == "over3") {
-      over3_visiblity = checked;
-      document.getElementById("legend2").style.display = over3_visiblity || over4_visiblity ? "inline-block" : "none";
-    } else if (layerName == "over4") {
-      over4_visiblity = checked;
-      document.getElementById("legend2").style.display = over3_visiblity || over4_visiblity ? "inline-block" : "none";
-    }
+  if (layerName == "over2")
+    document.getElementById("legend1").style.display = checked ? "inline-block" : "none";
+  else if (layerName == "over3") {
+    over3_visiblity = checked;
+    document.getElementById("legend2").style.display = over3_visiblity || over4_visiblity ? "inline-block" : "none";
+  } else if (layerName == "over4") {
+    over4_visiblity = checked;
+    document.getElementById("legend2").style.display = over3_visiblity || over4_visiblity ? "inline-block" : "none";
   }
   var selectedLayer = [];
-  document.getElementsByName("overlaySelect").forEach(function (elm) {
-    if (elm.checked) selectedLayer.push(elm.value);
+  document.querySelectorAll('input[name="overlaySelect"]:checked').forEach(function (elm) {
+    selectedLayer.push(elm.value);
   });
 
   config.data.overlay = selectedLayer;
@@ -1427,14 +817,14 @@ function estimated_intensity_mapReq() {
         ConvertEQInfo({
           category: "推計震度分布",
           status: "通常",
-          reportTime: ItemTmp.hypo.it,
-          originTime: ItemTmp.hypo.at,
-          maxI: ItemTmp.hypo.maxi,
-          mag: ItemTmp.hypo.mag,
-          lat: ItemTmp.hypo.lat,
-          lng: ItemTmp.hypo.lon,
-          depth: ItemTmp.hypo.dep,
-          epiCenter: ItemTmp.hypo.epi,
+          reportTime: ItemTmp.hypo?.it,
+          originTime: ItemTmp.hypo?.at,
+          maxI: ItemTmp.hypo?.maxi,
+          mag: ItemTmp.hypo?.mag,
+          lat: ItemTmp.hypo?.lat,
+          lng: ItemTmp.hypo?.lon,
+          depth: ItemTmp.hypo?.dep,
+          epiCenter: ItemTmp.hypo?.epi,
           comment: ItemTmp.comment,
           cancel: null,
         });
@@ -1442,7 +832,7 @@ function estimated_intensity_mapReq() {
         InfoType_add("type-6");
         var idTmp = ItemTmp.url;
 
-        ItemTmp.mesh_num.forEach(function (elm, index) {
+        (ItemTmp.mesh_num || []).forEach(function (elm, index) {
           var lat = Number(elm.substring(0, 2)) / 1.5;
           var lng = Number(elm.substring(2, 4)) + 100;
           var lat2 = lat + 2 / 3;
@@ -1490,7 +880,7 @@ function jma_ListReq() {
         return timeStampB - timeStampA;
       }).forEach(function (elm) {
         var kindCode = elm.match(".+/(.+?).[a-z]+([?#;].*)?$")?.[1]?.split("_")?.[2];
-        if (kindCode && json_kindCode_history2[kindCode]) {
+        if (kindCode && !json_kindCode_history2[kindCode]) {
           //より新しい同一種別の情報がなければ受信
           json_kindCode_history2[kindCode] = true;
           jma_Fetch(elm);
@@ -1527,27 +917,26 @@ function narikakun_ListReq() {
 //気象庁 取得・フォーマット変更→ ConvertEQInfo
 function jma_Fetch(url) {
   if (fetchedURL.includes(url)) return;
-  fetchedURL.push(url);
   fetch(url)
     .then(function (res) { return res.json(); })
     .then(function (json) {
       var LatLngDepth, originTimeTmp, epiCenterTmp, magnitudeTmp, maxIntTmp, LatTmp, LngTmp, depthTmp;
 
-      if (json.Body.Earthquake) {
-        if (json.Body.Earthquake.Hypocenter.Area.Coordinate_WGS) {
+      if (json.Body?.Earthquake) {
+        if (json.Body.Earthquake.Hypocenter?.Area?.Coordinate_WGS) {
           LatLngDepth = parse_LatLngDepth(json.Body.Earthquake.Hypocenter.Area.Coordinate_WGS);
-          LatLngDepth[1] /= 100
-          LatLngDepth[2] /= 100
-        } else {
+          if (LatLngDepth && LatLngDepth[1] != null) LatLngDepth[1] /= 100;
+          if (LatLngDepth && LatLngDepth[2] != null) LatLngDepth[2] /= 100;
+        } else if (json.Body.Earthquake.Hypocenter?.Area?.Coordinate) {
           LatLngDepth = parse_LatLngDepth(json.Body.Earthquake.Hypocenter.Area.Coordinate);
         }
       }
-      if (json.Body.Earthquake) {
+      if (json.Body?.Earthquake) {
         if (json.Body.Earthquake.OriginTime) originTimeTmp = new Date(json.Body.Earthquake.OriginTime);
-        if (json.Body.Earthquake.Hypocenter.Area.Name) epiCenterTmp = json.Body.Earthquake.Hypocenter.Area.Name;
+        if (json.Body.Earthquake.Hypocenter?.Area?.Name) epiCenterTmp = json.Body.Earthquake.Hypocenter.Area.Name;
         if (json.Body.Earthquake.Magnitude) magnitudeTmp = Number(json.Body.Earthquake.Magnitude);
       }
-      if (json.Body.Intensity && json.Body.Intensity.Observation.MaxInt) {
+      if (json.Body?.Intensity?.Observation?.MaxInt) {
         maxIntTmp = json.Body.Intensity.Observation.MaxInt;
       }
       if (LatLngDepth) {
@@ -1555,18 +944,18 @@ function jma_Fetch(url) {
         if (!isNaN(LatLngDepth[2]) && LatLngDepth[2]) LngTmp = Number(LatLngDepth[2]);
         if (!isNaN(LatLngDepth[3]) && LatLngDepth[3]) depthTmp = Math.abs(Number(LatLngDepth[3]) / 1000);
       }
-      var cancelTmp = json.Head.InfoType == "取消";
+      var cancelTmp = json.Head?.InfoType == "取消";
 
       var commentText = {
         ForecastComment: "",
         VarComment: "",
         FreeFormComment: "",
       };
-      if (json.Body.Comments) {
-        if (json.Body.Comments.ForecastComment && json.Body.Comments.ForecastComment.Text) {
+      if (json.Body?.Comments) {
+        if (json.Body.Comments.ForecastComment?.Text) {
           commentText.ForecastComment = json.Body.Comments.ForecastComment.Text;
         }
-        if (json.Body.Comments.VarComment && json.Body.Comments.VarComment.Text) {
+        if (json.Body.Comments.VarComment?.Text) {
           commentText.VarComment = json.Body.Comments.VarComment.Text;
         }
         if (json.Body.Comments.FreeFormComment) {
@@ -1575,7 +964,7 @@ function jma_Fetch(url) {
       }
 
       var IntData = [];
-      if (json.Body.Intensity && json.Body.Intensity.Observation.Pref) {
+      if (json.Body?.Intensity?.Observation?.Pref) {
         json.Body.Intensity.Observation.Pref.forEach(function (elm) {
           var areaData = [];
           if (elm.Area) {
@@ -1587,8 +976,8 @@ function jma_Fetch(url) {
                   if (elm3.IntensityStation) {
                     elm3.IntensityStation.forEach(function (elm4) {
                       stData.push({
-                        lat: elm4.latlon.lat,
-                        lng: elm4.latlon.lon,
+                        lat: elm4.latlon?.lat,
+                        lng: elm4.latlon?.lon,
                         name: elm4.Name,
                         int: elm4.Int,
                       });
@@ -1613,9 +1002,9 @@ function jma_Fetch(url) {
       }
 
       ConvertEQInfo({
-        category: json.Head.Title,
-        status: json.Control.Status,
-        reportTime: json.Head.ReportDateTime,
+        category: json.Head?.Title,
+        status: json.Control?.Status,
+        reportTime: json.Head?.ReportDateTime,
         originTime: originTimeTmp,
         maxI: maxIntTmp,
         mag: magnitudeTmp,
@@ -1627,34 +1016,34 @@ function jma_Fetch(url) {
         cancel: cancelTmp,
         IntData: IntData,
       });
+      fetchedURL.push(url);
     });
 }
 
 var jmaL_json_fetched = false
 function jmaL_Fetch(url) {
   if (fetchedURL.includes(url)) return;
-  fetchedURL.push(url);
   fetch(url)
     .then(function (res) {
       return res.json();
     })
     .then(function (json) {
       document.getElementById("LgInt_radioWrap").style.display = "block";
-      if (json.Body.Earthquake) {
-        if (json.Body.Earthquake.Hypocenter.Area.Coordinate_WGS) {
+      if (json.Body?.Earthquake) {
+        if (json.Body.Earthquake.Hypocenter?.Area?.Coordinate_WGS) {
           LatLngDepth = parse_LatLngDepth(json.Body.Earthquake.Hypocenter.Area.Coordinate_WGS);
-          LatLngDepth[1] /= 100
-          LatLngDepth[2] /= 100
-        } else {
+          if (LatLngDepth && LatLngDepth[1] != null) LatLngDepth[1] /= 100;
+          if (LatLngDepth && LatLngDepth[2] != null) LatLngDepth[2] /= 100;
+        } else if (json.Body.Earthquake.Hypocenter?.Area?.Coordinate) {
           var LatLngDepth = parse_LatLngDepth(json.Body.Earthquake.Hypocenter.Area.Coordinate);
         }
       }
-      if (json.Body.Earthquake) {
+      if (json.Body?.Earthquake) {
         if (json.Body.Earthquake.OriginTime) var originTimeTmp = new Date(json.Body.Earthquake.OriginTime);
-        if (json.Body.Earthquake.Hypocenter.Area.Name) var epiCenterTmp = json.Body.Earthquake.Hypocenter.Area.Name;
+        if (json.Body.Earthquake.Hypocenter?.Area?.Name) var epiCenterTmp = json.Body.Earthquake.Hypocenter.Area.Name;
         if (json.Body.Earthquake.Magnitude) var magnitudeTmp = Number(json.Body.Earthquake.Magnitude);
       }
-      if (json.Body.Intensity && json.Body.Intensity.Observation.MaxInt) {
+      if (json.Body?.Intensity?.Observation?.MaxInt) {
         var maxIntTmp = json.Body.Intensity.Observation.MaxInt;
       }
       if (LatLngDepth && !isNaN(LatLngDepth[1]) && LatLngDepth[1]) {
@@ -1667,28 +1056,28 @@ function jmaL_Fetch(url) {
         var depthTmp = Math.abs(Number(LatLngDepth[3]) / 1000);
       }
 
-      var cancelTmp = json.Head.InfoType == "取消";
+      var cancelTmp = json.Head?.InfoType == "取消";
 
-      if (json.Body.Comments) {
+      if (json.Body?.Comments) {
         var commentText = {
           ForecastComment: "",
           VarComment: "",
           FreeFormComment: "",
         };
-        if (json.Body.Comments.ForecastComment && json.Body.Comments.ForecastComment.Text) {
+        if (json.Body.Comments.ForecastComment?.Text) {
           commentText.ForecastComment = json.Body.Comments.ForecastComment.Text;
         }
-        if (json.Body.Comments.VarComment && json.Body.Comments.VarComment.Text) {
+        if (json.Body.Comments.VarComment?.Text) {
           commentText.VarComment = json.Body.Comments.VarComment.Text;
         }
-        if (json.Body.Comments.FreeFormComment && json.Body.Comments.FreeFormComment) {
+        if (json.Body.Comments.FreeFormComment) {
           commentText.FreeFormComment = json.Body.Comments.FreeFormComment;
         }
       }
 
       var LngIntData = [];
       var IntData = [];
-      if (json.Body.Intensity && json.Body.Intensity.Observation.Pref) {
+      if (json.Body?.Intensity?.Observation?.Pref) {
         json.Body.Intensity.Observation.Pref.forEach(function (elm) {
           var areaDataL = [];
           var areaData = [];
@@ -1699,14 +1088,14 @@ function jmaL_Fetch(url) {
               if (elm2.IntensityStation) {
                 elm2.IntensityStation.forEach(function (elm4) {
                   stDataL.push({
-                    lat: elm4.latlon.lat,
-                    lng: elm4.latlon.lon,
+                    lat: elm4.latlon?.lat,
+                    lng: elm4.latlon?.lon,
                     name: elm4.Name,
                     lgint: elm4.LgInt,
                   });
                   stData.push({
-                    lat: elm4.latlon.lat,
-                    lng: elm4.latlon.lon,
+                    lat: elm4.latlon?.lat,
+                    lng: elm4.latlon?.lon,
                     name: elm4.Name,
                     int: elm4.Int,
                   });
@@ -1734,9 +1123,9 @@ function jmaL_Fetch(url) {
       }
 
       ConvertEQInfo({
-        category: json.Head.Title,
-        status: json.Control.Status,
-        reportTime: 0,
+        category: json.Head?.Title,
+        status: json.Control?.Status,
+        reportTime: json.Head?.ReportDateTime || json.Control?.DateTime || 0,
         originTime: originTimeTmp,
         maxI: maxIntTmp,
         mag: magnitudeTmp,
@@ -1750,23 +1139,29 @@ function jmaL_Fetch(url) {
         IntData: IntData,
       });
       jmaL_json_fetched = true
+      fetchedURL.push(url);
     });
 }
 //気象庁防災XML 取得・フォーマット変更→ ConvertEQInfo
 function jmaXMLFetch(url) {
   if (fetchedURL.includes(url)) return;
-  fetchedURL.push(url);
   fetch(url)
-    .then((response) => { return response.text(); })
+    .then((response) => {
+      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+      return response.text();
+    })
     .then((data) => {
       var parser = new DOMParser();
       var xml = parser.parseFromString(data, "application/xml");
-      var cancelTmp = xml.querySelector("InfoType").textContent == "取消";
+      if (!xml || xml.querySelector("parsererror")) throw new Error("XMLのパースに失敗");
+      var cancelTmp = (xml.querySelector("InfoType")?.textContent || "").trim() == "取消";
       var ReportTime = new Date(xml.querySelector("Head ReportDateTime")?.textContent);
       if (!newInfoDateTime || newInfoDateTime <= ReportTime) {
         newInfoDateTime = ReportTime;
       }
-      var EarthquakeElm = xml.querySelector("Body Earthquake");
+      var eventIds = (xml.querySelector("EventID")?.textContent || "").trim().split(/\s+/);
+      var eqIndex = Math.max(0, eventIds.indexOf(String(eid)));
+      var EarthquakeElm = xml.getElementsByTagName("Earthquake")?.[eqIndex];
       var originTimeTmp,
         epiCenterTmp,
         magnitudeTmp,
@@ -1778,19 +1173,39 @@ function jmaXMLFetch(url) {
         maxIntTmp;
 
       if (EarthquakeElm) {
-        originTimeTmp = new Date(EarthquakeElm.querySelector("OriginTime").textContent);
-        epiCenterTmp = EarthquakeElm.querySelector("Name").textContent;
-        magnitudeTmp = Number(EarthquakeElm.getElementsByTagName("jmx_eb:Magnitude")?.[0]?.textContent);
-        magnitudeTypeTmp = EarthquakeElm.getElementsByTagName("jmx_eb:Magnitude")?.[0]?.getAttribute("type");
-        LatLngDepth = parse_LatLngDepth(xml.querySelector("Body Earthquake Hypocenter")?.getElementsByTagName("jmx_eb:Coordinate")?.[0]?.textContent)
-        LatTmp = Number(LatLngDepth[1]);
-        LngTmp = Number(LatLngDepth[2]);
-        DepthTmp = Number(LatLngDepth[3] / 1000);
+        var originTimeStr = EarthquakeElm.querySelector("OriginTime")?.textContent;
+        if (originTimeStr) originTimeTmp = new Date(originTimeStr);
+        epiCenterTmp = EarthquakeElm.querySelector("Name")?.textContent;
+        var magElm = EarthquakeElm.getElementsByTagName("jmx_eb:Magnitude")?.[0];
+        magnitudeTmp = Number(magElm?.textContent);
+        var magDesc = magElm?.getAttribute?.("description") || "";
+        if (!Boolean2(magnitudeTmp)) {
+          if (magDesc.includes("８を超える巨大地震") || magDesc.includes("8を超える巨大地震")) {
+            magnitudeTmp = "M8超";
+          } else {
+            magnitudeTmp = null;
+          }
+        }
+        magnitudeTypeTmp = magElm?.getAttribute?.("type");
+        LatLngDepth = parse_LatLngDepth(EarthquakeElm.getElementsByTagName("jmx_eb:Coordinate")?.[0]?.textContent);
+        if (LatLngDepth && LatLngDepth.length) {
+          var parsedLat = Number(LatLngDepth[1]);
+          var parsedLng = Number(LatLngDepth[2]);
+          if (!isNaN(parsedLat) && parsedLat >= -90 && parsedLat <= 90 &&
+            !isNaN(parsedLng) && parsedLng >= -180 && parsedLng <= 180) {
+            LatTmp = parsedLat;
+            LngTmp = parsedLng;
+            DepthTmp = LatLngDepth[3] ? Number(LatLngDepth[3] / 1000) : null;
+          }
+        }
+      } else {
+        var tgDateStr = xml.querySelector("Head TargetDateTime")?.textContent;
+        if (tgDateStr) originTimeTmp = new Date(tgDateStr);
       }
 
       var IntensityElm = xml.querySelector("Body Intensity");
       if (IntensityElm)
-        maxIntTmp = NormalizeShindo(IntensityElm.querySelector("MaxInt").textContent, 4);
+        maxIntTmp = NormalizeShindo(IntensityElm.querySelector("MaxInt")?.textContent, 4);
 
       var commentText = {
         ForecastComment: "",
@@ -1799,15 +1214,16 @@ function jmaXMLFetch(url) {
       };
       if (xml.querySelector("Body Comments")) {
         if (xml.querySelector("Body Comments ForecastComment"))
-          commentText.ForecastComment = xml.querySelector("Body Comments ForecastComment Text").textContent;
+          commentText.ForecastComment = xml.querySelector("Body Comments ForecastComment Text")?.textContent || "";
         if (xml.querySelector("Body Comments VarComment"))
-          commentText.VarComment = xml.querySelector("Body Comments VarComment Text").textContent;
+          commentText.VarComment = xml.querySelector("Body Comments VarComment Text")?.textContent || "";
         if (xml.querySelector("Body Comments FreeFormComment"))
-          commentText.FreeFormComment = xml.querySelector("Body Comments FreeFormComment").textContent;
+          commentText.FreeFormComment = xml.querySelector("Body Comments FreeFormComment")?.textContent || "";
       }
 
-      var infoType = xml.querySelector("Head Title").textContent;
-      if (xml.querySelector("Control Title").textContent == "津波情報a" || xml.querySelector("Control Title").textContent == "津波警報・注意報・予報a")
+      var infoType = xml.querySelector("Head Title")?.textContent || "";
+      var controlTitle = xml.querySelector("Control Title")?.textContent;
+      if (controlTitle == "津波情報a" || controlTitle == "津波警報・注意報・予報a")
         infoType = "津波";
 
       var LngIntData = [];
@@ -1827,28 +1243,32 @@ function jmaXMLFetch(url) {
                     if (elm3.querySelectorAll("IntensityStation")[0]) {
                       elm3.querySelectorAll("IntensityStation")
                         .forEach(function (elm4) {
-                          var pointT = JMA_Int_Points[Number(elm4.querySelector("Code").textContent)];
+                          var pointT = JMA_Int_Points[Number(elm4.querySelector("Code")?.textContent)];
                           if (elm4.querySelector("Int")) {
                             stData.push({
                               lat: pointT ? pointT.y : null,
                               lng: pointT ? pointT.x : null,
-                              name: elm4.querySelector("Name").textContent,
-                              int: elm4.querySelector("Int").textContent,
+                              name: elm4.querySelector("Name")?.textContent || "",
+                              int: elm4.querySelector("Int")?.textContent || "",
                             });
                           }
                           if (elm4.querySelector("LgInt")) {
                             stDataL.push({
                               lat: pointT ? pointT.y : null,
                               lng: pointT ? pointT.x : null,
-                              name: elm4.querySelector("Name").textContent,
-                              lgint: elm4.querySelector("LgInt").textContent,
+                              name: elm4.querySelector("Name")?.textContent || "",
+                              lgint: elm4.querySelector("LgInt")?.textContent || "",
                             });
                           }
                         });
                     }
+                    //５弱以上未入電をConditionから拾う
+                    var cityInt = elm3.querySelector(":scope > MaxInt")?.textContent || elm3.querySelector(":scope > Condition")?.textContent || null;
+                    var cityName = elm3.querySelector(":scope > Name")?.textContent || elm3.querySelector("Name")?.textContent || "";
                     cityData.push({
-                      name: elm3.querySelector("Name").textContent,
-                      int: elm3.querySelector("MaxInt").textContent,
+                      name: cityName,
+                      int: NormalizeShindo(cityInt),
+                      condition: elm3.querySelector(":scope > Condition")?.textContent || null,
                       station: stData,
                     });
                   });
@@ -1857,63 +1277,70 @@ function jmaXMLFetch(url) {
                   var stDataL = [];
                   elm2.querySelectorAll("IntensityStation")
                     .forEach(function (elm4) {
-                      var pointT = JMA_Int_Points[Number(elm4.querySelector("Code").textContent)];
+                      var pointT = JMA_Int_Points[Number(elm4.querySelector("Code")?.textContent)];
                       if (elm4.querySelector("Int")) {
                         stData.push({
                           lat: pointT ? pointT.y : null,
                           lng: pointT ? pointT.x : null,
-                          name: elm4.querySelector("Name").textContent,
-                          int: elm4.querySelector("Int").textContent,
+                          name: elm4.querySelector("Name")?.textContent || "",
+                          int: elm4.querySelector("Int")?.textContent || "",
                         });
                       }
                       if (elm4.querySelector("LgInt")) {
                         stDataL.push({
                           lat: pointT ? pointT.y : null,
                           lng: pointT ? pointT.x : null,
-                          name: elm4.querySelector("Name").textContent,
-                          lgint: elm4.querySelector("LgInt").textContent,
+                          name: elm4.querySelector("Name")?.textContent || "",
+                          lgint: elm4.querySelector("LgInt")?.textContent || "",
                         });
                       }
                     });
                 }
+                var areaInt = elm2.querySelector(":scope > MaxInt")?.textContent || elm2.querySelector(":scope > Condition")?.textContent || null;
+                var areaName = elm2.querySelector(":scope > Name")?.textContent || elm2.querySelector("Name")?.textContent || "";
                 areaData.push({
-                  name: elm2.querySelector("Name").textContent,
-                  int: elm2.querySelector("MaxInt").textContent,
+                  name: areaName,
+                  int: NormalizeShindo(areaInt),
+                  condition: elm2.querySelector(":scope > Condition")?.textContent || null,
                   city: cityData,
                   station: stData,
                 });
-                if (elm2.querySelector("MaxLgInt")) {
+                if (elm2.querySelector(":scope > MaxLgInt")) {
                   areaDataL.push({
-                    name: elm2.querySelector("Name").textContent,
-                    lgint: elm2.querySelector("MaxLgInt").textContent,
+                    name: areaName,
+                    lgint: elm2.querySelector(":scope > MaxLgInt")?.textContent || "",
                     station: stDataL,
                   });
                 }
               });
             }
-            if (elm.querySelector("MaxInt")) {
+            if (elm.querySelector(":scope > MaxInt") || areaData.length > 0) {
               IntData.push({
-                name: elm.querySelector("Name").textContent,
-                int: elm.querySelector("MaxInt").textContent,
+                name: elm.querySelector(":scope > Name")?.textContent || elm.querySelector("Name")?.textContent || "",
+                int: elm.querySelector(":scope > MaxInt")?.textContent || "",
                 area: areaData,
               });
             }
-            if (elm.querySelector("MaxLgInt")) {
+            if (elm.querySelector(":scope > MaxLgInt")) {
               LngIntData.push({
-                name: elm.querySelector("Name").textContent,
-                lgint: elm.querySelector("MaxLgInt").textContent,
+                name: elm.querySelector(":scope > Name")?.textContent || elm.querySelector("Name")?.textContent || "",
+                lgint: elm.querySelector(":scope > MaxLgInt")?.textContent || "",
                 area: areaDataL,
               });
             }
           });
       }
 
+      var cdtStr = xml.querySelector("Control DateTime")?.textContent;
+
       ConvertEQInfo({
+        controlTitle: controlTitle || null,
         category: infoType,
-        status: xml.querySelector("Control Status").textContent,
-        reportTime: new Date(xml.querySelector("Head ReportDateTime").textContent),
+        ControlDateTime: cdtStr ? new Date(cdtStr) : null,
+        status: xml.querySelector("Control Status")?.textContent || "通常",
+        reportTime: ReportTime || new Date(xml.querySelector("Head ReportDateTime")?.textContent || 0),
         originTime: originTimeTmp,
-        maxI: maxIntTmp,
+        maxI: IntensityElm ? maxIntTmp : undefined,
         mag: magnitudeTmp,
         magType: magnitudeTypeTmp,
         lat: LatTmp,
@@ -1922,45 +1349,45 @@ function jmaXMLFetch(url) {
         epiCenter: epiCenterTmp,
         comment: commentText,
         cancel: cancelTmp,
-        LngIntData: jmaL_json_fetched ? null : LngIntData,//気象庁json apiとの衝突を回避（）
-        IntData: IntData,
+        LngIntData: jmaL_json_fetched ? null : (xml.querySelector("Body Intensity Observation") ? LngIntData : undefined),//気象庁json apiとの衝突を回避（）
+        IntData: xml.querySelector("Body Intensity Observation") ? IntData : undefined,
       });
+      fetchedURL.push(url);
+    }).catch((err) => {
+      console.error("jmaXMLFetch error:", err);
     });
 }
 //narikakun地震情報API 取得・フォーマット変更→ ConvertEQInfo
 function narikakun_Fetch(url) {
   if (fetchedURL.includes(url)) return;
 
-  fetchedURL.push(url);
-
   fetch(url)
     .then(function (res) { return res.json(); })
     .then(function (json) {
-      if (json.Head.EventID == eid) {
+      if (json.Head?.EventID == eid) {
         var originTimeTmp, magnitudeTmp, depthTmp, epiCenterTmp, LatTmp, LngTmp, maxIntTmp, commentTmp;
-        if (json.Body.Earthquake) {
+        if (json.Body?.Earthquake) {
           if (json.Body.Earthquake.OriginTime) originTimeTmp = new Date(json.Body.Earthquake.OriginTime);
           if (json.Body.Earthquake.Magnitude) magnitudeTmp = Number(json.Body.Earthquake.Magnitude);
-          if (json.Body.Earthquake.Hypocenter.Depth) depthTmp = Number(json.Body.Earthquake.Hypocenter.Depth);
-          if (json.Body.Earthquake.Hypocenter.Name) epiCenterTmp = json.Body.Earthquake.Hypocenter.Name;
-          if (json.Body.Earthquake.Hypocenter.Latitude) LatTmp = json.Body.Earthquake.Hypocenter.Latitude;
-          if (json.Body.Earthquake.Hypocenter.Longitude) LngTmp = json.Body.Earthquake.Hypocenter.Longitude;
+          if (json.Body.Earthquake.Hypocenter?.Depth) depthTmp = Number(json.Body.Earthquake.Hypocenter.Depth);
+          if (json.Body.Earthquake.Hypocenter?.Name) epiCenterTmp = json.Body.Earthquake.Hypocenter.Name;
+          if (json.Body.Earthquake.Hypocenter?.Latitude) LatTmp = json.Body.Earthquake.Hypocenter.Latitude;
+          if (json.Body.Earthquake.Hypocenter?.Longitude) LngTmp = json.Body.Earthquake.Hypocenter.Longitude;
         }
-        if (json.Body.Intensity && json.Body.Intensity.Observation.MaxInt)
+        if (json.Body?.Intensity?.Observation?.MaxInt)
           maxIntTmp = json.Body.Intensity.Observation.MaxInt;
-        if (json.Body.Comments && json.Body.Comments.Observation)
+        if (json.Body?.Comments?.Observation)
           commentTmp = {
             ForecastComment: json.Body.Comments.Observation,
             VarComment: "",
             FreeFormComment: "",
           };
 
-        var cancelTmp = json.Head.InfoType == "取消";
+        var cancelTmp = json.Head?.InfoType == "取消";
 
         var IntData = [];
         if (
-          json.Body.Intensity &&
-          json.Body.Intensity.Observation.Pref &&
+          json.Body?.Intensity?.Observation?.Pref &&
           json.Body.Intensity.Observation.Pref.length > 0
         ) {
           json.Body.Intensity.Observation.Pref.forEach(function (elm) {
@@ -2001,9 +1428,9 @@ function narikakun_Fetch(url) {
         }
 
         ConvertEQInfo({
-          category: json.Head.Title,
-          status: json.Control.Status,
-          reportTime: json.Head.ReportDateTime,
+          category: json.Head?.Title,
+          status: json.Control?.Status,
+          reportTime: json.Head?.ReportDateTime,
           originTime: originTimeTmp,
           maxI: maxIntTmp,
           mag: magnitudeTmp,
@@ -2016,25 +1443,27 @@ function narikakun_Fetch(url) {
           IntData: IntData,
         });
       }
+      fetchedURL.push(url);
     });
 }
 
 function axisInfoCtrl(json) {
-  var Earthquake = json.Body.Earthquake[0];
-  var LatLngDepth = parse_LatLngDepth(Earthquake.Hypocenter.Area.Coordinate[0].valueOf_)
+  var Earthquake = json.Body?.Earthquake?.[0];
+  var coord = Earthquake?.Hypocenter?.Area?.Coordinate?.[0]?.valueOf_;
+  var LatLngDepth = coord ? parse_LatLngDepth(coord) : null;
 
   var originTimeTmp, epiCenterTmp, magnitudeTmp, maxIntTmp, LatTmp, LngTmp, depthTmp;
 
-  if (Earthquake.OriginTime) {
+  if (Earthquake?.OriginTime) {
     originTimeTmp = new Date(Earthquake.OriginTime);
   }
-  if (Earthquake.Hypocenter.Area.Name) {
+  if (Earthquake?.Hypocenter?.Area?.Name) {
     epiCenterTmp = Earthquake.Hypocenter.Area.Name;
   }
-  if (Earthquake.Magnitude) {
+  if (Earthquake?.Magnitude) {
     magnitudeTmp = Number(Earthquake.Magnitude);
   }
-  if (json.Body.Intensity && json.Body.Intensity.Observation.MaxInt) {
+  if (json.Body?.Intensity?.Observation?.MaxInt) {
     maxIntTmp = json.Body.Intensity.Observation.MaxInt;
   }
 
@@ -2044,18 +1473,18 @@ function axisInfoCtrl(json) {
     if (!isNaN(LatLngDepth[3]) && LatLngDepth[3]) depthTmp = Math.abs(Number(LatLngDepth[3]) / 1000);
   }
 
-  var cancelTmp = json.Head.InfoType == "取消";
+  var cancelTmp = json.Head?.InfoType == "取消";
 
   var commentText = {
     ForecastComment: "",
     VarComment: "",
     FreeFormComment: "",
   };
-  if (json.Body.Comments) {
-    if (json.Body.Comments.ForecastComment && json.Body.Comments.ForecastComment.Text) {
+  if (json.Body?.Comments) {
+    if (json.Body.Comments.ForecastComment?.Text) {
       commentText.ForecastComment = json.Body.Comments.ForecastComment.Text;
     }
-    if (json.Body.Comments.VarComment && json.Body.Comments.VarComment.Text) {
+    if (json.Body.Comments.VarComment?.Text) {
       commentText.VarComment = json.Body.Comments.VarComment.Text;
     }
     if (json.Body.Comments.FreeFormComment) {
@@ -2064,7 +1493,7 @@ function axisInfoCtrl(json) {
   }
 
   var IntData = [];
-  if (json.Body.Intensity && json.Body.Intensity.Observation.Pref) {
+  if (json.Body?.Intensity?.Observation?.Pref) {
     json.Body.Intensity.Observation.Pref.forEach(function (elm) {
       var areaData = [];
       if (elm.Area) {
@@ -2099,9 +1528,9 @@ function axisInfoCtrl(json) {
   }
 
   ConvertEQInfo({
-    category: json.Head.Title,
-    status: json.Control.Status,
-    reportTime: json.Head.ReportDateTime,
+    category: json.Head?.Title,
+    status: json.Control?.Status,
+    reportTime: json.Head?.ReportDateTime,
     originTime: originTimeTmp,
     maxI: maxIntTmp,
     mag: magnitudeTmp,
@@ -2285,7 +1714,7 @@ function add_Area_info(name, maxInt) {
     newDiv3.setAttribute("aria-label", `${homeName}エリアの ${name}、震度${NormalizeShindo(maxInt, 1)}`);
     newDiv3.setAttribute("title", `細分区域（${homeName}周辺）：${name}`);
 
-    removeChild(document.getElementById("homeShindo"));
+    document.getElementById("homeShindo")?.replaceChildren();
     document.getElementById("homeShindoWrap").style.display = "block";
     document.getElementById("homeShindo").appendChild(newDiv3);
   }
@@ -2407,20 +1836,26 @@ function add_IntensityStation_info(lat, lng, name, int) {
     if (!lat || !lng) return;
     map.flyTo({ center: [lng, lat], zoom: 11, duration: 800 });
 
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
+
     if (icon) Int_Sta_Popup({ features: [icon] });
   });
 
-  wrap3[wrap3.length - 1]?.append(newDiv);
+  wrap3[wrap3.length - 1].append(newDiv);
 }
 
-var WaitingToDraw = null
-function DrawIntensity() {
-  if (WaitingToDraw) var data = WaitingToDraw
-  else return
+var WaitingToDraw = null;
+const DrawIntensity = throttle(function () {
+  if (WaitingToDraw) var data = WaitingToDraw;
+  else return;
+
   var has_StaShindo = false;
   intensityIcons = [];
   intensityIcons_st = [];
-  removeChild(document.getElementById("Shindo"));
+  document.getElementById("Shindo")?.replaceChildren();
   document.getElementById("ShindoWrap").style.display = "inline-block";
   document.getElementById("Shindo").style.display = "block";
   mapFillReset();
@@ -2469,14 +1904,17 @@ function DrawIntensity() {
   else mapContainer.classList.remove("has_StaShindo");
 
   mapFillDraw();
-}
+}, 500);
 
 function DrawLgIntensity(data) {
+  data = data || [];
   LgIntIcons = [];
   LgIntIcons_st = [];
-  removeChild(document.getElementById("LngInt"));
-  document.getElementById("ShindoWrap").style.display = "inline-block";
-  document.getElementById("lngintListWrap").style.display = "block";
+  document.getElementById("LngInt")?.replaceChildren();
+  if (data?.length) {
+    document.getElementById("ShindoWrap").style.display = "inline-block";
+    document.getElementById("lngintListWrap").style.display = "block";
+  }
   mapFillResetL();
 
   LgIntFragment = document.createDocumentFragment();
@@ -2577,7 +2015,7 @@ function add_Area_infoL(name, maxInt) {
     newDiv3.setAttribute("aria-label", `${homeName}エリアの ${name}、長周期地震動階級${maxInt} `);
     newDiv3.setAttribute("title", `細分区域（${homeName} 周辺）：${name} `);
 
-    removeChild(document.getElementById("homeShindoL"));
+    document.getElementById("homeShindoL")?.replaceChildren();
     document.getElementById("homeShindoWrap").style.display = "block";
     document.getElementById("homeShindoL").appendChild(newDiv3);
   }
@@ -2659,16 +2097,47 @@ var EQInfoMarged = {};
 var EQInfoData = [];
 //地震情報マージ
 function ConvertEQInfo(data) {
+  // 電文の取得が地図の初期化より先に完了する場合は、load後に反映する。
+  if (!mapReady) {
+    pendingEQInfo.push(data);
+    return;
+  }
   var sameData = EQInfoData.find(function (elm) {
-    return (elm.category == data.category && Number(new Date(elm.reportTime)) == Number(new Date(data.reportTime)));
+    if (elm.category !== data.category) return false;
+    if (Number(new Date(elm.reportTime)) !== Number(new Date(data.reportTime))) return false;
+    if (elm.ControlDateTime && data.ControlDateTime) {
+      return Number(new Date(elm.ControlDateTime)) === Number(new Date(data.ControlDateTime));
+    }
+    return !elm.ControlDateTime && !data.ControlDateTime;
   });
-  if (sameData) return;
-
-  EQInfoData.push(data);
+  if (sameData) {
+    // 同一報の別受信元からの情報を相互補完
+    var syncKeys = ["status", "originTime", "maxI", "mag", "magType", "lat", "lng", "depth", "epiCenter"];
+    syncKeys.forEach(function (key) {
+      var val = data[key];
+      if (!Boolean2(val)) return;
+      if (key === "maxI" && val === "?") return;
+      if (key === "mag" && (val === "Ｍ不明" || val === "NaN" || Number.isNaN(val))) return;
+      sameData[key] = val;
+    });
+    var hasValidComment = (
+      Boolean2(data.comment?.ForecastComment) ||
+      Boolean2(data.comment?.VarComment) ||
+      Boolean2(data.comment?.FreeFormComment)
+    );
+    if (hasValidComment) sameData.comment = data.comment;
+    if (Boolean2(data.IntData)) sameData.IntData = data.IntData;
+    if (Boolean2(data.LngIntData)) sameData.LngIntData = data.LngIntData;
+    if (data.cancel !== undefined && data.cancel !== null) sameData.cancel = data.cancel;
+  } else {
+    EQInfoData.push(data);
+  }
 
   var sortByReportDT = function (a, b) {
-    return new Date(a.reportTime) < new Date(b.reportTime) ? -1 : 1;
-  }
+    var diff = new Date(a.reportTime) - new Date(b.reportTime);
+    return diff !== 0 ? diff : (new Date(a.ControlDateTime || 0) - new Date(b.ControlDateTime || 0));
+    //reportDateTime→ControlDateTimeでソート　ControlDT空、ReportDT重複（分単位のため）の回避
+  };
   var EQI_EEW = EQInfoData.filter((e) => { return e.category == "EEW" }).sort(sortByReportDT);
   var EQI_NOT_EEW = EQInfoData.filter((e) => { return e.category != "EEW" }).sort(sortByReportDT);
   EQInfoData = [...EQI_EEW, ...EQI_NOT_EEW];
@@ -2676,7 +2145,9 @@ function ConvertEQInfo(data) {
   EQInfoData.forEach(function (elm, index) {
     if (elm.cancel) {
       EQInfoData.slice(0, index).forEach(function (elm2, index2) {
-        if (elm2.category == elm.category) EQInfoData[index2].cancel = true;
+        var sameType = (elm2.controlTitle && elm.controlTitle) ? (elm2.controlTitle == elm.controlTitle) : (elm2.category == elm.category);
+        var sameStatus = !elm2.status || !elm.status || (elm2.status == elm.status);
+        if (sameType && sameStatus) EQInfoData[index2].cancel = true;
       });
     }
   });
@@ -2709,30 +2180,30 @@ function ConvertEQInfo(data) {
     }
 
     if (!elm.cancel) {
-      function Boolean3(a) {
-        return Boolean2(a) && elm.maxI !== "?" && elm.mag != "Ｍ不明" && elm.mag != "NaN";
-      }
-
-      var keys = ["category", "status", "reportTime", "originTime", "maxI", "mag", "magType", "lat", "lng", "depth", "epiCenter"]
+      var keys = ["category", "status", "reportTime", "originTime", "maxI", "mag", "magType", "lat", "lng", "depth", "epiCenter"];
       keys.forEach((key) => {
-        if (Boolean3(elm[key])) EQInfoTmp[key] = elm[key];
-      })
+        var val = elm[key];
+        if (val === undefined) return;
+        if (key === "maxI" && val === "?") val = null;
+        if (key === "mag" && (val === "NaN" || Number.isNaN(val))) val = null;
+        EQInfoTmp[key] = val;
+      });
 
-      if (Boolean2(elm.comment) && (Boolean2(elm.comment.ForecastComment) || Boolean2(elm.comment.VarComment) || Boolean2(elm.comment.FreeFormComment))) {
-        if (!EQInfoTmp.comment) EQInfoTmp.comment = elm.comment;
+      if (elm.comment !== undefined) {
+        EQInfoTmp.comment = elm.comment;
       }
 
-      if (Boolean2(elm.LngIntData)) EQInfoTmp.LngIntData = elm.LngIntData;
+      if (elm.LngIntData !== undefined) EQInfoTmp.LngIntData = elm.LngIntData;
     }
   });
 
   //長周期のデータを先に追加し、長周期以外を後から追加することで、長周期以外のものを優先
-  EQInfoData.filter((elm) => elm.category == "長周期地震動に関する観測情報").forEach(function (elm) {
-    if (Boolean2(elm.IntData)) EQInfoTmp.IntData = elm.IntData;
+  EQInfoData.filter((elm) => !elm.cancel && elm.category == "長周期地震動に関する観測情報").forEach(function (elm) {
+    if (elm.IntData?.length || elm.IntData === null) EQInfoTmp.IntData = elm.IntData;
   });
 
-  EQInfoData.filter((elm) => elm.category !== "長周期地震動に関する観測情報").forEach(function (elm) {
-    if (Boolean2(elm.IntData)) EQInfoTmp.IntData = elm.IntData;
+  EQInfoData.filter((elm) => !elm.cancel && elm.category !== "長周期地震動に関する観測情報").forEach(function (elm) {
+    if (elm.IntData?.length || elm.IntData === null) EQInfoTmp.IntData = elm.IntData;
   });
 
   EQInfoTmp.cancel = !EQInfoData.find(function (elm) {
@@ -2741,35 +2212,55 @@ function ConvertEQInfo(data) {
 
   EQInfoMarged = EQInfoTmp;
 
-  if (EQInfoMarged.IntData) {
-    WaitingToDraw = EQInfoMarged.IntData
-    throttle(DrawIntensity, 500)()
-  }
+  WaitingToDraw = EQInfoMarged.IntData || [];
+  DrawIntensity();
 
   if (EQInfoMarged.LngIntData) {
     InfoType_add("type-7");
     DrawLgIntensity(EQInfoMarged.LngIntData);
+  } else {
+    DrawLgIntensity([]);
+    document.getElementById("lngintListWrap").style.display = "none";
   }
 
   document.getElementById("cancelled").style.display = EQInfoMarged.cancel ? "flex" : "none";
 
   var keys = ["originTime", "maxI", "mag", "lat", "lng", "epiCenter", "depth"];
   keys.forEach((key) => {
-    if (Boolean2(EQInfoMarged[key])) EQInfo[key] = EQInfoMarged[key];
+    EQInfo[key] = EQInfoMarged[key];
   });
 
   if (EQInfo.originTime) data_time.innerText = NormalizeDate(4, EQInfo.originTime);
-  if (EQInfo.maxI) data_maxI.innerText = NormalizeShindo(EQInfo.maxI, 1);
-  if (EQInfo.maxI) data_maxI.style.borderBottom = `solid 2px ${NormalizeShindo(EQInfo.maxI, 2)[0]}`;
+  else data_time.innerText = "不明";
+
+  if (EQInfo.maxI) {
+    data_maxI.innerText = NormalizeShindo(EQInfo.maxI, 1);
+    data_maxI.style.borderBottom = `solid 2px ${NormalizeShindo(EQInfo.maxI, 2)[0]}`;
+  } else {
+    data_maxI.innerText = "不明";
+    data_maxI.style.borderBottom = "";
+  }
+
   if (EQInfoMarged.magType) EQInfo.magType = EQInfoMarged.magType;
   else if (!EQInfo.magType) EQInfo.magType = "M";
-  if (EQInfo.mag) data_M.innerText = `${EQInfo.magType} ${EQInfo.mag}`;
 
-  if (EQInfo.depth == 0) data_depth.innerText = "ごく浅い";
-  else if (EQInfo.depth == 700) data_depth.innerText = "700km以上";
-  else if (EQInfo.depth) data_depth.innerText = `${Math.round(EQInfo.depth)}km`;
+  if (EQInfo.mag) {
+    if (EQInfo.mag === "M8超" || EQInfo.mag === "Ｍ８を超える巨大地震") {
+      data_M.innerText = "Ｍ８を超える巨大地震";
+    } else {
+      data_M.innerText = `${EQInfo.magType} ${EQInfo.mag}`;
+    }
+  } else {
+    data_M.innerText = "不明";
+  }
+
+  if (EQInfo.depth === 0) data_depth.innerText = "ごく浅い";
+  else if (Math.abs(EQInfo.depth) >= 700) data_depth.innerText = "700km以上";
+  else if (EQInfo.depth) data_depth.innerText = `${Math.abs(Math.round(EQInfo.depth))}km`;
+  else data_depth.innerText = "不明";
 
   if (EQInfo.epiCenter) data_center.innerText = EQInfo.epiCenter;
+  else data_center.innerText = "不明";
 
   if (EQInfoMarged.comment) {
     EQInfo.comment = EQInfoMarged.comment;
@@ -2838,10 +2329,17 @@ function ConvertEQInfo(data) {
       document.getElementById("TsunamiShortMsg_Wrap").style.borderWidth = TsunamiColor ? "2px" : "";
       document.getElementById("TsunamiShortMsg_Wrap").style.color = TsunamiColor ? "#FFF" : "";
       document.getElementById("TsunamiShortMsg").innerText = TsunamiShortMsg;
+    } else {
+      document.getElementById("TsunamiShortMsg_Wrap").style.display = "none";
+      document.getElementById("TsunamiShortMsg").innerText = "";
     }
+  } else {
+    data_comment.innerHTML = "";
+    document.getElementById("TsunamiShortMsg_Wrap").style.display = "none";
+    document.getElementById("TsunamiShortMsg").innerText = "";
   }
 
-  if (EQInfoMarged.lat && EQInfoMarged.lng) {
+  if (Boolean2(EQInfoMarged.lat) && Boolean2(EQInfoMarged.lng)) {
     if (ZoomBounds) ZoomBounds.extend([EQInfoMarged.lng, EQInfoMarged.lat]);
 
     if (!ESmarkerElm) {
@@ -2858,6 +2356,9 @@ function ConvertEQInfo(data) {
       ESmarkerElm.getElement().removeAttribute("tabindex");
       ESmarkerElm.getElement().setAttribute("aria-hidden", true);
     } else ESmarkerElm.setLngLat([EQInfoMarged.lng, EQInfoMarged.lat]);
+  } else if (ESmarkerElm) {
+    ESmarkerElm.remove();
+    ESmarkerElm = null;
   }
 
   mapZoomReset();
@@ -2978,11 +2479,10 @@ function Boolean2(elm) {
 
 function parse_LatLngDepth(str) {
   try {
-    if (str) {
-      return String(str).replaceAll("+", "｜+").replaceAll("-", "｜-").replaceAll("/", "").split("｜");
-    }
+    const matches = String(str).match(/[+-]\d+(?:\.\d+)?/g);
+    return matches ? ["", ...matches] : [];
   } catch {
-    return []
+    return [];
   }
 }
 function throttle(cb, delay = 1000) {
