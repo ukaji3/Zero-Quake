@@ -24,6 +24,58 @@ export function isLinuxAutostartEnabled() {
 }
 
 /**
+ * Desktop Entry の Exec キーに書く 1 つの引数（実行ファイルのパス）をエスケープする（Issue #33）。
+ *
+ * Desktop Entry 仕様の規則に従う。
+ * 1. 引数を二重引用符で囲み、`"`、`` ` ``、`$`、`\` の前にバックスラッシュを付ける（引用の規則）
+ * 2. 文字列値のエスケープ規則は引用の規則より先に適用されるため、バックスラッシュをさらに二重にする
+ * 3. `%` はフィールドコードと区別するため `%%` にする
+ * https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html
+ * @param {string} arg 引数
+ * @returns {string} Exec キーにそのまま書ける文字列
+ * @throws {Error} 改行・タブ・復帰文字を含む場合（Exec キーに書けないため）
+ */
+export function escapeDesktopExecArg(arg) {
+  const value = String(arg);
+  if (/[\n\r\t]/.test(value)) throw new Error("Desktop Entry の Exec に改行・タブを含むパスは書けません");
+  const quoted = `"${value.replace(/[\\"`$]/g, "\\$&")}"`;
+  return quoted.replace(/\\/g, "\\\\").replace(/%/g, "%%");
+}
+
+/**
+ * 自動起動で起動する実行ファイルのパスを返す（Issue #33）。
+ * AppImage で起動している場合、実行ファイルは一時的なマウント先にあり再起動後は存在しないため、
+ * AppImage 本体のパス（環境変数 APPIMAGE）を使う。
+ * @param {NodeJS.ProcessEnv} [env] 環境変数
+ * @param {() => string} [getExePath] 実行ファイルのパスを返す関数
+ * @returns {string} 実行ファイルのパス
+ */
+export function resolveAutostartExecPath(env = process.env, getExePath = () => app.getPath("exe")) {
+  if (env.APPIMAGE) return env.APPIMAGE;
+  return getExePath();
+}
+
+/**
+ * GNOME の自動起動用 .desktop ファイルの内容を作る（Issue #33）。
+ * @param {string} execPath 実行ファイルのパス
+ * @returns {string} .desktop ファイルの内容
+ */
+export function buildAutostartDesktopEntry(execPath) {
+  return `[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Zero Quake
+Comment=地震・津波情報表示アプリケーション
+Exec=${escapeDesktopExecArg(execPath)}
+Icon=zeroquake
+Terminal=false
+Categories=Utility;Network;
+StartupNotify=true
+X-GNOME-Autostart-enabled=true
+`;
+}
+
+/**
  * Linux（GNOME）の自動起動を設定する。
  * `~/.config/autostart` に .desktop ファイルを作成または削除する。
  * @param {boolean} openAtLogin 自動起動を有効にするなら true
@@ -39,25 +91,18 @@ export function setOpenAtLogin_Linux(openAtLogin) {
   const autostartDir = path.dirname(desktopFile);
 
   if (openAtLogin) {
+    let desktopEntry;
+    try {
+      desktopEntry = buildAutostartDesktopEntry(resolveAutostartExecPath());
+    } catch (err) {
+      console.error(new Date().toLocaleString(), "[autostart]", err);
+      return;
+    }
+
     // autostart ディレクトリが存在しない場合は作成
     if (!fs.existsSync(autostartDir)) {
       fs.mkdirSync(autostartDir, { recursive: true });
     }
-
-    const appPath = app.getPath("exe");
-    const desktopEntry = `[Desktop Entry]
-Type=Application
-Version=1.0
-Name=Zero Quake
-Comment=地震・津波情報表示アプリケーション
-Exec=${appPath}
-Icon=zeroquake
-Terminal=false
-Categories=Utility;Network;
-StartupNotify=true
-X-GNOME-Autostart-enabled=true
-`;
-
     fs.writeFileSync(desktopFile, desktopEntry, "utf8");
   } else if (fs.existsSync(desktopFile)) {
     // 自動起動を無効化
