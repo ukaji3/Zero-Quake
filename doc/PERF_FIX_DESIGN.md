@@ -1,5 +1,12 @@
 # 性能改善 設計書（Issue #18〜#27）
 
+> **注意（Issue #39 で追記）**: この文書は upstream v0.9.10 を取り込む前（PR #31 より前）の fork の実装の設計記録。
+> PR #31（Issue #30）で upstream の実装に置き換えた項目が多く、今のコードとは一致しない。
+> Issue ごとの扱い（upstream 採用・移植・一部移植）は
+> [Issue #30 の対応表](https://github.com/ukaji3/Zero-Quake/issues/30#issuecomment-6721647247) を参照。
+> 移植して残っているのは #23（予報円アニメーションの停止。`src/js/mainWindow.js` の `psWaveAnmStart`）、#24（保持データの上限。`src/main/retention.js`）、
+> #25（WorkerWindow の再生成の上限。`src/main/windows.js` の `Create_WorkerWindow`）、#27（ログ。`src/main/state.js`）の一部。
+
 対象ブランチ: `fix/performance-issues-18-27`
 トラッキング Issue: #28
 

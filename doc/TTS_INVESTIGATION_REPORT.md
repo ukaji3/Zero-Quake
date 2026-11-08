@@ -1,5 +1,11 @@
 # 音声合成が動作しない問題の調査レポート
 
+> **注意（Issue #39 で追記）**: この文書は Issue #32（PR #50）より前の調査・実装の記録で、今の実装とは一致しない。
+> PR #50 で、IPC の `ExecuteTTSCommand`・`TestTTSCommand`・`TestTTSCommandResult` と、preload の `window.electronAPI.send` を削除した。
+> 今は、読み上げは WorkerWindow から `window.electronAPI.ttsSpeakCustomCommand`（IPC `tts:speak`）、
+> 設定画面のテストは `window.electronAPI.ttsTestCustomCommand`（IPC `tts:test`）で、メインプロセスの `src/main/tts_ipc.js` が処理する。
+> 今の実装とセキュリティ対策は [TTS_IMPLEMENTATION_NOTES.md](TTS_IMPLEMENTATION_NOTES.md) を参照。
+
 ## 問題の症状
 
 - **音声テストボタン**: 正常に動作し、音声が再生される

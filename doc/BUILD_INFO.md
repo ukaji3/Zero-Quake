@@ -1,5 +1,11 @@
 # Zero Quake ビルド情報
 
+> **注意（Issue #39 で追記）**: この文書は 0.9.5 のビルド時点（2024 年 12 月）の記録で、今の版とは一致しない。
+> 「IPC API の拡張」に書いた preload の `window.electronAPI.send()`・`on()`・`removeListener()` は、
+> Issue #32（PR #50）で削除した。音声合成の IPC は今は `tts:speak` と `tts:test` で、
+> 詳細は [TTS_IMPLEMENTATION_NOTES.md](TTS_IMPLEMENTATION_NOTES.md) を参照。
+> ビルドの手順と成果物の名前は [README.md](../README.md) と [LINUX_INSTALL.md](LINUX_INSTALL.md) を参照。
+
 ## 最新ビルド（システムトレイ修正版）
 
 **バージョン**: 0.9.5  
