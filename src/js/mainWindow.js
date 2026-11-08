@@ -4,9 +4,11 @@ var Tsunami_MajorWarning, Tsunami_Warning, Tsunami_Watch, Tsunami_Yoho;
 
 var psWaveList = [];
 var tsunamiAlertNow = false;
+var hinanjoLayers = [];
 var current_EEW = [];
 var Replay = 0;
 var background = false;
+var knetMapData;
 var snetMapData;
 var userPosition = [138.46, 32.99125];
 var userZoom = 4;
@@ -14,11 +16,10 @@ var userMotionFlg;
 
 var high_contrast = window.matchMedia("(forced-colors: active)").matches;
 
-/**
- * ウィンドウの可視状態変化を background 判定に反映する（Issue #21）。
- * 最小化・（プラットフォームが対応する場合）完全遮蔽で document.hidden が true になる。
- * 復帰時は activate と同じ再描画を行う。
- */
+document.body.addEventListener("mouseover", function () {
+  background = false;
+});
+
 document.addEventListener("visibilitychange", function () {
   if (document.hidden) {
     background = true;
@@ -32,12 +33,10 @@ document.addEventListener("visibilitychange", function () {
  */
 function activateWindow() {
   background = false;
-  kmoniForceAll = true;
-  if (kmoniLatest) kmoniApplyUpdate(kmoniLatest);
+  if (knetMapData) kmoniMapUpdate(knetMapData, "knet");
   if (snetMapData) kmoniMapUpdate(snetMapData, "snet");
   if (TREMRTS_TMP) TREMRTSUpdate(TREMRTS_TMP);
   if (SeisJS_TMP) SeisJSUpdate(SeisJS_TMP);
-  if (current_EEW.length > 0) psWaveAnmStart();
 }
 var tsunamiStations = [];
 
@@ -46,6 +45,58 @@ fetch("./Resource/TsunamiStations.json")
   .then(function (data) {
     tsunamiStations = data;
   });
+
+var KNET_geometry;
+fetch("./Resource/Knet_Points.json")
+  .then(function (res) { return res.json(); })
+  .then(function (data) {
+    var geojson = { type: "FeatureCollection", features: [] };
+    data.forEach(function (elm) {
+      if (elm.IsSuspended) return;
+      geojson.features.push({
+        type: "Feature",
+        properties: {
+          Code: elm.Code,
+          Name: elm.Name,
+          Region: elm.Region,
+          Type: elm.Type,
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [elm.Location.Longitude, elm.Location.Latitude],
+        },
+      });
+    });
+    KNET_geometry = geojson;
+    if (map) map.getSource("knet_points")?.setData(KNET_geometry);
+
+  });
+
+
+var Snet_geometry;
+fetch("./Resource/Snet_Points.json")
+  .then(function (res) { return res.json(); })
+  .then(function (data) {
+    var geojson = { type: "FeatureCollection", features: [] };
+    data.forEach(function (elm) {
+      geojson.features.push({
+        type: "Feature",
+        properties: {
+          Code: elm.Code,
+          Type: elm.Type,
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [elm.Location.Longitude, elm.Location.Latitude],
+        },
+      });
+    });
+    Snet_geometry = geojson;
+    if (map) map.getSource("snet_points")?.setData(Snet_geometry);
+  });
+
+var TREMRTS_geometry;
+var SeisJS_geometry;
 
 var TREMRTS_TMP;
 var SeisJS_TMP;
@@ -62,16 +113,14 @@ window.electronAPI.messageSend((event, request) => {
     JMAEstShindoControl(request.data);
   } else if (request.action == "UpdateStatus") {
     UpdateStatus(request.timestamp, request.LocalTime, request.type, request.condition);
-  } else if (request.action == "kmoniMaster") {
-    kmoniSetMaster(request.data);
   } else if (request.action == "kmoniUpdate") {
     UpdateStatus(request.timestamp, request.LocalTime, "kmoniImg", "success");
-    kmoniApplyUpdate(request);
+    knetMapData = request.data;
+    if (!background) kmoniMapUpdate(request.data, "knet");
   } else if (request.action == "SnetUpdate") {
     UpdateStatus(request.timestamp, request.LocalTime, "msilImg", "success");
-    kmoniMapUpdate(request.data, "snet");
-  } else if (request.action == "TREM-RTSMaster") {
-    TREMRTSSetMaster(request.data);
+    snetMapData = request.data;
+    if (!background) kmoniMapUpdate(request.data, "snet");
   } else if (request.action == "TREM-RTSUpdate") {
     TREMRTS_TMP = request.data;
     TREMRTSUpdate(request.data);
@@ -82,19 +131,17 @@ window.electronAPI.messageSend((event, request) => {
     Replay = request.data;
     document.getElementById("replayFrame").style.display = Replay == 0 ? "none" : "block";
 
-    var geojson = { type: "FeatureCollection", features: [] };
     if (map) {
-      map.getSource("SEISJS_points").setData(geojson);
-      map.getSource("snet_points").setData(geojson);
-      //knet/TREM は Feature 集合が不変のため state のみクリアし、次回更新で全点を再送する
-      kmoniResetState();
-      TREMRTSResetState();
+      map.removeFeatureState({ source: "knet_points" });
+      map.removeFeatureState({ source: "snet_points" });
+      map.removeFeatureState({ source: "TREMRTS_points" });
+      map.removeFeatureState({ source: "SEISJS_points" });
     }
     psWaveEntry();
   } else if (request.action == "EQInfo") eqInfoDraw(request.data, request.source);
   else if (request.action == "EQCount") eqCountDraw(request.data);
-  else if (request.action == "EQDetect") EQDetect(request.data);
-  else if (request.action == "EQDetectFinish") EQDetectFinish(request.data);
+  else if (request.action == "EQDetectUpdate") EQDetectUpdate(request.data);
+  else if (request.action == "EQDetectFinish") EQDetectFinish(request.id);
   else if (request.action == "tsunamiUpdate") tsunamiDataUpdate(request.data);
   else if (request.action == "NankaiTroughInfo") NankaiTroughInfo(request.data);
   else if (request.action == "HokkaidoSanrikuInfo") HokkaidoSanrikuInfo(request.data);
@@ -104,7 +151,49 @@ window.electronAPI.messageSend((event, request) => {
   else if (request.action == "Return_wepa") draw_wepa(request.data);
   else if (request.action == "Deny_additionalEQInfo_JMA") deny_additionalEQInfo_JMA();
   else if (request.action == "Deny_additionalEQInfo_USGS") deny_additionalEQInfo_USGS();
+  else if (request.action == "TremRts_sta") {
+    if (!request.data) return;
+    var geojson = { type: "FeatureCollection", features: [] };
+    Object.keys(request.data).forEach(function (key) {
+      var elm = request.data[key];
+      if (!elm?.lon || !elm?.lat) return;
+      geojson.features.push({
+        type: "Feature",
+        properties: {
+          Code: key,
+          Type: "TREM-RTS",
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [elm.lon, elm.lat],
+        },
+      });
+    });
+    TREMRTS_geometry = geojson;
+    if (map) map.getSource("TREMRTS_points")?.setData(TREMRTS_geometry);
 
+  } else if (request.action == "Seisjs_sta") {
+    if (!request.data) return;
+    var geojson = { type: "FeatureCollection", features: [] };
+    Object.keys(request.data).forEach(function (key) {
+      var elm = request.data[key];
+      geojson.features.push({
+        type: "Feature",
+        properties: {
+          Code: elm.name,
+          Name: elm.location,
+          Type: "SeisJS",
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [elm.longitude, elm.latitude],
+        },
+      });
+    });
+    SeisJS_geometry = geojson;
+    if (map) map.getSource("SEISJS_points")?.setData(SeisJS_geometry);
+
+  }
   document.getElementById("splash").style.display = "none";
   return true;
 });
@@ -121,17 +210,16 @@ window.addEventListener("load", () => {
   }
 
   //強震モニタお知らせ取得
-  fetch(`http://www.kmoni.bosai.go.jp/webservice/maintenance/message.json?_=${Number(new Date())}`)
+  fetch(`http://www.kmoni.bosai.go.jp/webservice/maintenance/message.json?_=${Date.now()}`)
     .then(function (res) { return res.json(); })
     .then(function (json) {
-      document.getElementById("kmoni_Message").innerHTML = json.message;
-    });
+      document.getElementById("kmoni_Message").innerHTML = json?.message || "";
+    }).catch(function () { });
 
-  psWaveAnmStart(); //予報円描画着火（EEW が無ければ即停止する）
+  psWaveAnmStart(); //予報円描画着火（EEW が無ければ即停止する。fork 独自: Issue #23）
   setInterval(function () {
-    //時計（ローカル時刻）更新。バックグラウンド中は DOM を触らない（Issue #23）
-    if (background) return;
-    if (UTDialogShow)
+    //時計（ローカル時刻）更新
+    if (UTDialogShow && !background)
       document.getElementById("PC_TIME").textContent = NormalizeDate(3, new Date() - Replay);
     document.getElementById("all_UpdateTime").textContent = NormalizeDate(3, new Date() - Replay);
   }, 500);
@@ -190,7 +278,9 @@ function EEW_AlertUpdate(data) {
       EEW_LocalIDs[elm.EventID] = EEWID;
     }
 
-    if (elm.alertflg == "警報" || elm.alertflg == "予報")
+    if (elm.is_cancel)
+      var textForReader = GenerateEEWText(elm, "取り消された緊急地震速報アイテム。{training}{grade}、第{serial}報。先ほどの緊急地震速報は取り消されました。");
+    else if (elm.alertflg == "警報" || elm.alertflg == "予報")
       var textForReader = GenerateEEWText(elm, "緊急地震速報アイテム。{training}{grade}、第{serial}報。[{location}の予想震度は{local_Int}。]予想マグニチュード、{magnitude}。予想最大震度、{maxInt}。{region_name}の、深さ{depth}キロメートルで、{origin_time}に発生。{final}");
     else
       var textForReader = GenerateEEWText(elm, "アーリエスト地震情報アイテム。第{serial}報。予想マグニチュード、{magnitude}。{region_name}の、深さ{depth}キロメートルで、{origin_time}に発生。{final}");
@@ -215,14 +305,10 @@ function EEW_AlertUpdate(data) {
     clone.querySelector(".region_name").textContent = elm.region_name ? elm.region_name : "震央不明";
     clone.querySelector(".origin_time").textContent = NormalizeDate(3, elm.origin_time);
     clone.querySelector(".magnitude").textContent = elm.magnitude || elm.magnitude == 0 ? Math.round(elm.magnitude * 10) / 10 : "不明";
-    if (elm.magnitude || elm.magnitude == 0)
-      clone.querySelector(".magnitude").classList.remove("UnknownMag");
-    else clone.querySelector(".magnitude").classList.add("UnknownMag");
+    clone.querySelector(".magnitude").classList.toggle("UnknownMag", (!elm.magnitude && elm.magnitude !== 0));
 
     clone.querySelector(".depth").textContent = elm.depth || elm.depth == 0 ? Math.round(elm.depth) : "不明";
-    if (elm.depth || elm.depth == 0)
-      clone.querySelector(".depth").classList.remove("UnknownDepth");
-    else clone.querySelector(".depth").classList.add("UnknownDepth");
+    clone.querySelector(".depth").classList.toggle("UnknownDepth", (!elm.depth && elm.depth !== 0));
 
     clone.querySelector(".training").style.display = elm.is_training ? "block" : "none";
     clone.querySelector(".EpicenterElement").style.display = !elm.isPlum ? "block" : "none";
@@ -240,7 +326,7 @@ function EEW_AlertUpdate(data) {
       document.getElementById("EEW-Panel").prepend(clone);
       document.getElementById("sokuho-Panel").scroll(0, 0);
     }
-    epiCenterUpdate(elm);
+    if (!elm.is_cancel) epiCenterUpdate(elm);
 
     current_EEW = current_EEW.filter(function (elm2) {
       return elm2.EventID !== elm.EventID;
@@ -270,8 +356,7 @@ function EEW_AlertUpdate(data) {
   var EEWData = data.filter((elm) => {
     return !elm.is_cancel;
   });
-  if (EEWData.length == 0) document.body.classList.remove("EEWMode");
-  else document.body.classList.add("EEWMode");
+  document.body.classList.toggle("EEWMode", EEWData.length !== 0);
 }
 
 var EEWID = 0;
@@ -422,7 +507,7 @@ function eqInfoDraw(data, source) {
 
     var data_to_draw = [...data];
   }
-  removeChild(EQListWrap);
+  EQListWrap?.replaceChildren();
 
 
   //ソート用にOriginTimeがないデータはReportTimeを参照する専用Dateを用意
@@ -431,7 +516,17 @@ function eqInfoDraw(data, source) {
   })
   data_to_draw.sort(function (a, b) {
     if (sort_key == "t") return (a.DateForSort < b.DateForSort ? 1 : -1) | 0;
-    else if (sort_key == "m") return (a.M < b.M ? 1 : -1) | 0;
+    else if (sort_key == "m") {
+      var toMNum = function (val) {
+        if (typeof val === "number") return val;
+        if (val === "M8超" || val === "8超" || val === "Ｍ８を超える巨大地震") return 10;
+        var n = Number(val);
+        return !Number.isNaN(n) ? n : 0;
+      };
+      var aM = toMNum(a.M);
+      var bM = toMNum(b.M);
+      return (aM < bM ? 1 : -1) | 0;
+    }
     else if (sort_key == "i") return (NormalizeShindo(a.maxI, 5) < NormalizeShindo(b.maxI, 5) ? 1 : -1) | 0;
     else return 0;
   });
@@ -444,70 +539,81 @@ function eqInfoDraw(data, source) {
       clone.querySelector(".EQItem").setAttribute("id", `EQItem_${elm.eventId}`);
       clone.querySelector(".EQItem").setAttribute("tabindex", index == 0 ? 2 : -1);
 
-      var dataToUse;
+      var dataToUse = null;
 
-      if (elm.std) {
-        dataToUse = elm.std[0]
+      if (Array.isArray(elm.std) && elm.std.length > 0) {
+        dataToUse = elm.std[0];
       } else if (elm.sum) {
-        dataToUse = elm.sum
-      } else if (elm.hourly[0]) {
-        dataToUse = elm.hourly[0]
-      } else { return; }
-
-      if (dataToUse.StartTime && dataToUse.EndTime) {
-        var StartTime = NormalizeDate("YYYY/M/D h時", new Date(dataToUse.StartTime))
-        var sameDate = NormalizeDate("YYYYMMDD", new Date(dataToUse.StartTime)) == NormalizeDate("YYYYMMDD", new Date(dataToUse.EndTime))
-        if (sameDate) var EndTime = NormalizeDate("h時", new Date(dataToUse.EndTime))
-        else var EndTime = NormalizeDate("M/D h時", new Date(dataToUse.EndTime))
-        var dateRangeStr = `${StartTime} ～ ${EndTime}`;
-
-        var nAvailable = dataToUse.Number || dataToUse.Number == 0;
-        var fnAvailable = dataToUse.FeltNumber || dataToUse.FeltNumber == 0;
-        if (fnAvailable && nAvailable) {
-          var content = `${dataToUse.Number}回 （うち有感${dataToUse.FeltNumber}回）`
-        } else if (nAvailable) {
-          var content = `${dataToUse.Number}回`
-        } else if (fnAvailable) {
-          var content = `有感${dataToUse.FeltNumber}回`
-        } else {
-          return false;
-        }
-
-        clone.querySelector(".EQI_datetime").textContent = dateRangeStr;
-        clone.querySelector(".cancelled").style.display = elm.cancel ? "flex" : "none";
-        clone.querySelector(".TestNotes").style.display = elm.status == "試験" ? "block" : "none";
-        clone.querySelector(".trainingNotes").style.display = elm.status == "訓練" ? "block" : "none";
-
-        clone.querySelector(".EQI_detail").innerText = `地震回数：${content}`;
-
-        if (elm.cancel) {
-          clone.querySelector(".EQItem").classList.add("EQI_cancelled");
-          clone.querySelector(".EQItem").setAttribute("aria-label", "取り消された地震情報アイテム");
-        } else {
-          clone.querySelector(".EQItem")
-            .setAttribute("aria-label",
-              `過去の気象庁による地震情報アイテム：${elm.status == "訓練" ? "訓練報、" : ""}${elm.status == "試験" ? "試験報、" : ""}${elm.headline}${content}
-        `//エンターキーで詳細情報を確認。
-            );
-          clone.querySelector(".EQItem").addEventListener("click", function () {
-            window.electronAPI.messageReturn({
-              action: "EQInfoWindowOpen",
-              url: "src/EQCountDetail.html",
-              eid: elm.eventId,
-              data: elm,
-            });
-          });
-        }
-
-        document.getElementById("JMA_EqInfo_Data").appendChild(clone);
+        dataToUse = elm.sum;
+      } else if (Array.isArray(elm.hourly) && elm.hourly.length > 0) {
+        dataToUse = elm.hourly[0];
       }
 
+      var dateRangeStr = "";
+      var content = "";
+
+      if (dataToUse && dataToUse.StartTime && dataToUse.EndTime) {
+        var StartTime = NormalizeDate("YYYY/M/D h時", new Date(dataToUse.StartTime));
+        var sameDate = NormalizeDate("YYYYMMDD", new Date(dataToUse.StartTime)) == NormalizeDate("YYYYMMDD", new Date(dataToUse.EndTime));
+        if (sameDate) var EndTime = NormalizeDate("h時", new Date(dataToUse.EndTime));
+        else var EndTime = NormalizeDate("M/D h時", new Date(dataToUse.EndTime));
+        dateRangeStr = `${StartTime} ～ ${EndTime}`;
+
+        var nAvailable = (dataToUse.Number !== null && dataToUse.Number !== undefined && dataToUse.Number !== -1);
+        var fnAvailable = (dataToUse.FeltNumber !== null && dataToUse.FeltNumber !== undefined && dataToUse.FeltNumber !== -1);
+        if (fnAvailable && nAvailable) {
+          content = `${dataToUse.Number}回 （うち有感${dataToUse.FeltNumber}回)`;
+        } else if (nAvailable) {
+          content = `${dataToUse.Number}回`;
+        } else if (fnAvailable) {
+          content = `有感${dataToUse.FeltNumber}回`;
+        } else {
+          content = elm.headline || elm.Text || (elm.cancel ? "取消" : "回数データなし");
+        }
+      } else {
+        dateRangeStr = NormalizeDate(4, new Date(elm.reportDateTime));
+        content = elm.headline || elm.Text || (elm.cancel ? "取消" : "回数データなし");
+      }
+
+      clone.querySelector(".EQI_datetime").textContent = dateRangeStr;
+      clone.querySelector(".cancelled").style.display = elm.cancel ? "flex" : "none";
+      clone.querySelector(".TestNotes").style.display = elm.status == "試験" ? "block" : "none";
+      clone.querySelector(".trainingNotes").style.display = elm.status == "訓練" ? "block" : "none";
+
+      clone.querySelector(".EQI_detail").innerText = elm.cancel ? "地震回数：取消" : `地震回数：${content}`;
+
+      if (elm.cancel) {
+        clone.querySelector(".EQItem").classList.add("EQI_cancelled");
+        clone.querySelector(".EQItem").setAttribute("aria-label", "取り消された地震情報アイテム");
+      } else {
+        clone.querySelector(".EQItem")
+          .setAttribute("aria-label",
+            `気象庁の地震履歴アイテム：${elm.status == "訓練" ? "訓練報、" : ""}${elm.status == "試験" ? "試験報、" : ""}${elm.headline || ""}${content}
+      `//エンターキーで詳細情報を確認。
+          );
+        clone.querySelector(".EQItem").addEventListener("click", function () {
+          window.electronAPI.messageReturn({
+            action: "EQInfoWindowOpen",
+            url: "src/EQCountDetail.html",
+            eid: elm.eventId,
+            data: elm,
+          });
+        });
+      }
+
+      document.getElementById("JMA_EqInfo_Data").appendChild(clone);
     } else {
       var clone = EQTemplate.content.cloneNode(true);
 
-      clone.querySelector(".EQI_epiCenter").textContent = elm.epiCenter || "震源調査中";
       clone.querySelector(".EQI_datetime").textContent = elm.OriginTime ? NormalizeDate(4, elm.OriginTime) : "発生時刻不明";
-      clone.querySelector(".EQI_magnitude").textContent = (elm.M || elm.M === 0) ? elm.M.toFixed(1) : "不明";
+      clone.querySelector(".EQI_epiCenter").textContent = elm.epiCenter || "震源調査中";
+      var magDisplay = "不明";
+      if (elm.M || elm.M === 0) {
+        if (typeof elm.M === "number") magDisplay = elm.M.toFixed(1);
+        else if (elm.M === "M8超" || elm.M === "8超" || elm.M === "Ｍ８を超える巨大地震") magDisplay = "8超";
+        else magDisplay = String(elm.M).replace(/^M/i, "");
+      }
+      clone.querySelector(".EQI_magnitude").textContent = magDisplay;
       if (source == "jma") {
         clone.querySelector(".EQItem").setAttribute("id", `EQItem_${elm.eventId}`);
         clone.querySelector(".EQItem").setAttribute("tabindex", index == 0 ? 2 : -1);
@@ -536,7 +642,8 @@ function eqInfoDraw(data, source) {
           var lgIntStr = ""
           if (elm.maxLgInt) lgIntStr = `最大長周期地震動階級${elm.maxLgInt}、`
 
-          var ariaLabel = `過去の気象庁による地震情報アイテム：${elm.status == "訓練" ? "訓練報、" : ""}${elm.status == "試験" ? "試験報、" : ""}${(maxITmp != "?") ? `最大震度${NormalizeShindo(maxITmp, 1)}、` : ""}${lgIntStr}${elm.M || elm.M === 0 ? `マグニチュード${elm.M.toFixed(1)}、` : ""}${elm.epiCenter ? `震源は${elm.epiCenter}、` : ""}発生時刻は${elm.OriginTime ? NormalizeDate("M月D日h時m分", elm.OriginTime) : "不明"}。エンターキーで詳細情報を確認。`
+          var magAria = typeof elm.M === "number" ? elm.M.toFixed(1) : ((elm.M === "M8超" || elm.M === "8超" || elm.M === "Ｍ８を超える巨大地震") ? "8超" : elm.M);
+          var ariaLabel = `過去の気象庁による地震情報アイテム：${elm.status == "訓練" ? "訓練報、" : ""}${elm.status == "試験" ? "試験報、" : ""}${(maxITmp != "?") ? `最大震度${NormalizeShindo(maxITmp, 1)}、` : ""}${lgIntStr}${elm.M || elm.M === 0 ? `マグニチュード${magAria}、` : ""}${elm.epiCenter ? `震源は${elm.epiCenter}、` : ""}発生時刻は${elm.OriginTime ? NormalizeDate("M月D日h時m分", elm.OriginTime) : "不明"}。エンターキーで詳細情報を確認。`
 
           clone.querySelector(".EQItem").setAttribute("aria-label", ariaLabel);
           clone.querySelector(".EQItem").addEventListener("click", function () {
@@ -557,7 +664,7 @@ function eqInfoDraw(data, source) {
         clone.querySelector(".EQI_maxI").style.color = colorTmp[1];
         var MMIStr = elm.maxI ? `最大改正メルカリ震度${NormalizeMMI(elm.maxI, 3)} ` : "";
 
-        var ariaLabel = `過去のUSGSによる地震情報アイテム：${MMIStr}、${elm.M || elm.M === 0 ? `マグニチュード${elm.M.toFixed(1)}、` : ""}${elm.epiCenter ? `震源は${elm.epiCenter}、` : ""}発生時刻は${NormalizeDate("M月D日h時m分", elm.OriginTime)}。エンターキーで詳細情報を確認。`;
+        var ariaLabel = `USGSの地震履歴アイテム：${MMIStr}、${elm.M || elm.M === 0 ? `マグニチュード${elm.M.toFixed(1)}、` : ""}${elm.epiCenter ? `震源は${elm.epiCenter}、` : ""}発生時刻は${NormalizeDate("M月D日h時m分", elm.OriginTime)}。エンターキーで詳細情報を確認。`;
         clone.querySelector(".EQItem").setAttribute("aria-label", ariaLabel);
 
         clone.querySelector(".EQItem").addEventListener("click", function () {
@@ -570,6 +677,14 @@ function eqInfoDraw(data, source) {
       EQListWrap.appendChild(clone);
     }
   });
+
+  if (source == "jma") {
+    var jmaLoading = document.getElementById("JMA_loading_more");
+    if (jmaLoading) jmaLoading.style.display = "none";
+  } else if (source == "usgs") {
+    var usgsLoading = document.getElementById("USGS_loading_more");
+    if (usgsLoading) usgsLoading.style.display = "none";
+  }
 
   //新規地震イベントの強調
   var new_entry_elm = new_entry ? document.getElementById(`EQItem_${new_entry.eventId}`) : null;
@@ -594,36 +709,47 @@ function eqCountDraw(data) {
 //🔴地震検知🔴
 var EQDetectItem = [];
 var EQDetectTemplate = document.getElementById("EQDetectTemplate");
-function EQDetect(data) {
+function EQDetectUpdate(data) {
   if (!map.loaded()) return;
   var EQD_Item = EQDetectItem.find(function (elm) {
     return elm.id == data.id;
   });
 
-  var DetectRegions = data.Codes.map(function (elm) {
-    return elm.Region;
-  });
+  var DetectRegions = data.member.map(m => {
+    var stData = KNET_geometry.features.find(e => e.properties.Code == m).properties;
+    return stData.Region
+  })
   DetectRegions = Array.from(new Set(DetectRegions));
+
+  var coordinates = data.member.map(m => {
+    var stData = KNET_geometry.features.find(e => e.properties.Code == m).geometry.coordinates;
+    return {
+      lon: stData[0],
+      lat: stData[1]
+    }
+  })
+
+  let _ellipse = getEllipseSigma(coordinates);
+  var color = config.color.Tsunami[data.Lv == 1 ? "TsunamiWatchColor" : "TsunamiWarningColor"];
 
   if (EQD_Item) {
     //情報更新
-    EQD_Item.lat = data.lat;
-    EQD_Item.lng = data.lng;
+    EQD_Item.serial = data.serial;
+    EQD_Item.maxInt = data.maxInt;
+    EQD_Item.member = data.member;
+    EQD_Item.active_member = data.active_member;
 
-    let _center = turf.point([data.lng, data.lat]);
-    let _radius = data.Radius + 5;
-    let _options = { steps: 80, units: "kilometers" };
-
-    let _circle = turf.circle(_center, _radius, _options);
-    if (map && map.getSource(`EQDItem_${data.id}`)) {
-      map.getSource(`EQDItem_${data.id}`).setData(_circle);
+    if (map?.getSource(`EQDItem_${data.id}`)) {
+      map.getSource(`EQDItem_${data.id}`).setData(_ellipse);
     }
-    EQD_Item.ECMarker.setLngLat([data.lng, data.lat]);
 
     var EQDItem = document.getElementById(`EQDItem_${data.id}`);
     EQDItem.classList.remove("lv1", "lv2");
     EQDItem.classList.add(`lv${data.Lv}`);
     EQDItem.querySelector(".EQD_Regions").innerText = DetectRegions.join(" ");
+
+    if (map.getLayer(`EQDItemF_${data.id}`)) map.setPaintProperty(`EQDItemF_${data.id}`, 'fill-color', color);
+    if (map.getLayer(`EQDItemS_${data.id}`)) map.setPaintProperty(`EQDItemS_${data.id}`, 'line-color', color);
   } else {
     //初回検知
     var clone = EQDetectTemplate.content.cloneNode(true);
@@ -633,39 +759,27 @@ function EQDetect(data) {
     EQDItem.querySelector(".EQD_Regions").innerText = DetectRegions.join(" ");
     document.getElementById("EQDetect-Panel").prepend(clone);
 
-    const img = document.createElement("img");
-    img.src = "./img/epicenter_EQDetect.svg";
-    img.classList.add("epicenterIcon");
+    EQDetectItem.push(data);
 
-    var ECMarker = new maplibregl.Marker({ element: img })
-      .setLngLat([data.lng, data.lat])
-      .addTo(map);
-    ECMarker.getElement().removeAttribute("tabindex");
-
-    EQDetectItem.push({
-      id: data.id,
-      lat: data.lat,
-      lng: data.lng,
-      ECMarker: ECMarker,
-    });
-
-    let _center = turf.point([data.lng, data.lat]);
-    let _radius = data.Radius + 5;
-    let _options = { steps: 80, units: "kilometers" };
-
-    let _circle = turf.circle(_center, _radius, _options);
-
-    map.addSource(`EQDItem_${data.id}`, { type: "geojson", data: _circle });
+    map.addSource(`EQDItem_${data.id}`, { type: "geojson", data: _ellipse });
 
     map.addLayer({
       id: `EQDItemF_${data.id}`,
       type: "fill",
       source: `EQDItem_${data.id}`,
-      paint: { "fill-color": "#FFF", "fill-opacity": 0.3 },
+      paint: { "fill-color": color, "fill-opacity": 0.3 },
+    }, "tsunami_Yoho");
+    map.addLayer({
+      id: `EQDItemS_${data.id}`,
+      type: "line",
+      source: `EQDItem_${data.id}`,
+      paint: {
+        "line-color": color,
+        "line-width": 2,
+        'line-dasharray': [2, 2]
+      },
     });
-
-    map.panTo([data.lng, data.lat], { animate: false });
-    map.fitBounds(turf.bbox(_circle), {
+    map.fitBounds(turf.bbox(_ellipse), {
       maxZoom: 7,
       animate: false,
       padding: 100,
@@ -676,7 +790,7 @@ function EQDetect(data) {
 }
 //地震検知終了
 function EQDetectFinish(id) {
-  var delIndex = EQDetectItem.findIndex(function (elm, index) {
+  var delIndex = EQDetectItem.findIndex(function (elm) {
     return elm.id == id;
   });
 
@@ -684,9 +798,9 @@ function EQDetectFinish(id) {
     var delElm = EQDetectItem[delIndex];
     if (map) {
       if (map.getLayer(`EQDItemF_${delElm.id}`)) map.removeLayer(`EQDItemF_${delElm.id}`);
+      if (map.getLayer(`EQDItemS_${delElm.id}`)) map.removeLayer(`EQDItemS_${delElm.id}`);
       if (map.getSource(`EQDItem_${delElm.id}`)) map.removeSource(`EQDItem_${delElm.id}`);
     }
-    if (delElm.ECMarker) delElm.ECMarker.remove();
 
     EQDetectItem.splice(delIndex, 1);
 
@@ -702,11 +816,6 @@ function EQDetectFinish(id) {
 //🔴UI🔴
 var updateTimeDialog = document.getElementById("UpdateTime_detail");
 
-//サイドバー表示・非表示
-document.getElementById("SideBarToggle").addEventListener("click", function () {
-  document.getElementById("sideBar").classList.toggle("close");
-  window.dispatchEvent(new Event("resize"));
-});
 document.getElementById("sideBar").addEventListener("transitionend", function () {
   window.dispatchEvent(new Event("resize"));
 });
@@ -746,7 +855,7 @@ function kmoniTimeRedraw(timestamp, LocalTime, type, condition) {
         iconElm.classList.add("SuccessAnm");
         iconElm.addEventListener("animationend", function () {
           this.classList.remove("SuccessAnm");
-        });
+        }, { once: true });
       }
       break;
     case "Error":
@@ -789,25 +898,21 @@ document.getElementById("CloseTsunamiRevocation").addEventListener("click", func
 });
 
 var AnmTimer;
+/** 予報円アニメーションが動作中か。EEW が無い間は停止する（fork 独自。Issue #23） */
 var psWaveAnmRunning = false;
-
 /**
- * 予報円アニメーションを開始する（既に動作中なら何もしない）。
- * EEW 受信時（psWaveEntry）と前面復帰時に呼ぶ。Issue #23
+ * 予報円アニメーションを（停止していれば）開始する。fork 独自（Issue #23）
  */
 function psWaveAnmStart() {
   if (psWaveAnmRunning) return;
   psWaveAnmRunning = true;
   psWaveAnm();
 }
-
-/**
- * 予報円アニメーションの 1 ティック。対象 EEW が無くなったらループを停止する。
- */
 function psWaveAnm() {
   if (AnmTimer) clearTimeout(AnmTimer)
   AnmTimer = null;
 
+  //取り消されていない EEW が無ければタイマーを再設定せずに停止する（fork 独自。Issue #23）
   var active = current_EEW.filter(function (elm) { return !elm.is_cancel; });
   if (active.length === 0) {
     psWaveAnmRunning = false;
@@ -877,9 +982,9 @@ function overlaySelect(layerName, checked) {
   }
   if (layerName == "hinanjo") {
     map.setLayoutProperty("hinanjo", "visibility", checked ? "visible" : "none");
-    HINANJO_LAYERS.forEach(function (def) {
-      if (map.getLayer(def.id)) {
-        map.setLayoutProperty(def.id, "visibility", checked ? "visible" : "none");
+    hinanjoLayers.forEach(function (elm) {
+      if (map.getLayer(elm)) {
+        map.setLayoutProperty(elm, "visibility", checked ? "visible" : "none");
       }
     });
   } else {
@@ -906,8 +1011,8 @@ function overlaySelect(layerName, checked) {
     }
   }
   var selectedLayer = [];
-  document.getElementsByName("overlaySelect").forEach(function (elm) {
-    if (elm.checked) selectedLayer.push(elm.value);
+  document.querySelectorAll('input[name="overlaySelect"]:checked').forEach(function (elm) {
+    selectedLayer.push(elm.value);
   });
 
   config.data.overlay = selectedLayer;
@@ -926,11 +1031,141 @@ var currentZoom = 4;
 function init() {
   if (map) return;
 
-  const protocol = new pmtiles.Protocol();
-  maplibregl.addProtocol("pmtiles", protocol.tile);
-  const PMTILES_URL = "https://cyberjapandata.gsi.go.jp/xyz/optimal_bvmap-v1/optimal_bvmap-v1.pmtiles";
-  const p = new pmtiles.PMTiles(PMTILES_URL);
-  protocol.add(p);
+  initPMTilesProtocol();
+
+  const style = getCommonMapStyle(config, {
+    includeTsunami: true,
+    transition: { duration: 0, delay: 0 },
+    extraSources: {
+      knet_points: {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+        promoteId: "Code",
+      },
+      snet_points: {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+        promoteId: "Code",
+      },
+      TREMRTS_points: {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+        promoteId: "Code",
+      },
+      SEISJS_points: {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+        promoteId: "Code",
+      },
+    },
+    pointLayers: [
+      {
+        id: "knet_points",
+        type: "circle",
+        source: "knet_points",
+        layout: {
+          visibility: config.data.kmoni_points_show ? "visible" : "none",
+        },
+        paint: {
+          "circle-color": [
+            "rgb",
+            ["coalesce", ["feature-state", "rgb_r"], 0],
+            ["coalesce", ["feature-state", "rgb_g"], 0],
+            ["coalesce", ["feature-state", "rgb_b"], 0],
+          ],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"],
+            2, ["case", ["boolean", ["feature-state", "visible"], false], 1, 0],
+            5, ["case", ["boolean", ["feature-state", "visible"], false], 3.75, 0],
+            15, ["case", ["boolean", ["feature-state", "visible"], false], 33.75, 0],
+          ],
+          "circle-stroke-width": ["case", ["boolean", ["feature-state", "visible"], false], 2, 0],//invisibleな場合線を消す
+          "circle-stroke-color": ["case", ["boolean", ["feature-state", "isTriggered"], false], "#cb732b", "#0000"]
+        },
+      },
+      {
+        id: "snet_points",
+        type: "circle",
+        source: "snet_points",
+        layout: {
+          visibility: config.data.kmoni_points_show ? "visible" : "none",
+        },
+        paint: {
+          "circle-color": [
+            "rgb",
+            ["coalesce", ["feature-state", "rgb_r"], 0],
+            ["coalesce", ["feature-state", "rgb_g"], 0],
+            ["coalesce", ["feature-state", "rgb_b"], 0],
+          ],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"],
+            2, ["case", ["boolean", ["feature-state", "visible"], false], 1, 0],
+            5, ["case", ["boolean", ["feature-state", "visible"], false], 3.75, 0],
+            15, ["case", ["boolean", ["feature-state", "visible"], false], 33.75, 0],
+          ],
+        },
+      },
+      {
+        id: "TREMRTS_points",
+        type: "circle",
+        source: "TREMRTS_points",
+        layout: {
+          visibility: config.data.kmoni_points_show ? "visible" : "none",
+        },
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"],
+            2, ["case", ["boolean", ["feature-state", "visible"], false], 1, 0],
+            5, ["case", ["boolean", ["feature-state", "visible"], false], 3.75, 0],
+            15, ["case", ["boolean", ["feature-state", "visible"], false], 33.75, 0],
+          ],
+          "circle-color": [
+            "rgb",
+            ["coalesce", ["feature-state", "rgb_r"], 0],
+            ["coalesce", ["feature-state", "rgb_g"], 0],
+            ["coalesce", ["feature-state", "rgb_b"], 0],
+          ],
+          "circle-stroke-color": [
+            "rgb",
+            ["coalesce", ["feature-state", "rgb_r"], 0],
+            ["coalesce", ["feature-state", "rgb_g"], 0],
+            ["coalesce", ["feature-state", "rgb_b"], 0],
+          ],
+
+          "circle-stroke-width": [
+            "case", [
+              "all",
+              ["boolean", ["feature-state", "visible"], false],
+              ["<=", ["coalesce", ["feature-state", "shindo"], 0], 0.3]
+            ],
+            1, 0
+          ],
+          "circle-opacity": [
+            "case", ["<=", ["coalesce", ["feature-state", "shindo"], 0], 0.3],
+            0, 1
+          ],
+        },
+      },
+      {
+        id: "SEISJS_points",
+        type: "circle",
+        source: "SEISJS_points",
+        layout: {
+          visibility: config.data.kmoni_points_show ? "visible" : "none",
+        },
+        paint: {
+          "circle-color": [
+            "rgb",
+            ["coalesce", ["feature-state", "rgb_r"], 0],
+            ["coalesce", ["feature-state", "rgb_g"], 0],
+            ["coalesce", ["feature-state", "rgb_b"], 0],
+          ],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"],
+            2, ["case", ["boolean", ["feature-state", "visible"], false], 1, 0],
+            5, ["case", ["boolean", ["feature-state", "visible"], false], 3.75, 0],
+            15, ["case", ["boolean", ["feature-state", "visible"], false], 33.75, 0],
+          ],
+        },
+      },
+    ],
+  });
 
   map = new maplibregl.Map({
     container: "mapcontainer",
@@ -939,616 +1174,7 @@ function init() {
     attributionControl: false,
     pitchWithRotate: false,
     dragRotate: false,
-    style: {
-      version: 8,
-      projection: { type: config.data.globeView ? "globe" : "mercator" },
-      glyphs: "https://gsi-cyberjapan.github.io/optimal_bvmap/glyphs/{fontstack}/{range}.pbf",
-      transition: { duration: 0, delay: 0 },
-      sources: {
-        v: {
-          type: "vector",
-          url: `pmtiles://${PMTILES_URL}`,
-          attribution: "国土地理院",
-          minzoom: 4,
-          maxzoom: 16,
-        },
-        worldmap: {
-          type: "vector",
-          url: "pmtiles://local-range-request://./src/Resource/world.pmtiles",
-          attribution: "Natural Earth",
-        },
-        basemap: {
-          type: "vector",
-          url: "pmtiles://local-range-request://./src/Resource/jp_sect.pmtiles",
-          attribution: "気象庁",
-        },
-        prefmap: {
-          type: "vector",
-          url: "pmtiles://local-range-request://./src/Resource/jp_pref.pmtiles",
-          tolerance: 0.9,
-          attribution: "気象庁",
-        },
-        lake: {
-          type: "geojson",
-          data: "./Resource/lake.json",
-          tolerance: 1.7,
-          attribution: "国土数値情報",
-        },
-        tsunami: {
-          type: "vector",
-          url: "pmtiles://local-range-request://./src/Resource/jp_tsunami.pmtiles",
-          attribution: "気象庁",
-        },
-        submarine: {
-          type: "raster",
-          //tiles: ["./Resource/Submarine/{z}/{x}/{y}.jpg"],
-          url: "pmtiles://local-range-request://./src/Resource/background.pmtiles",
-          tileSize: 256,
-          attribution: "GEBCO, Peter Bird",
-          minzoom: 0,
-          maxzoom: 6,
-        },
-        tile0: {
-          type: "raster",
-          tiles: ["https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 2,
-          maxzoom: 18,
-        },
-        tile1: {
-          type: "raster",
-          tiles: ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 2,
-          maxzoom: 18,
-        },
-        tile2: {
-          type: "raster",
-          tiles: ["https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg"],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 2,
-          maxzoom: 18,
-        },
-        tile4: {
-          type: "raster",
-          tiles: ["http://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          attribution: "OpenStreetMap contributors",
-          minzoom: 0,
-          maxzoom: 19,
-        },
-        over0: {
-          type: "raster",
-          tiles: ["https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 2,
-          maxzoom: 16,
-        },
-        over1: {
-          type: "raster",
-          tiles: ["https://cyberjapandata.gsi.go.jp/xyz/vbmd_colorrel/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 11,
-          maxzoom: 18,
-        },
-        over2: {
-          type: "raster",
-          tiles: [
-            "https://disaportaldata.gsi.go.jp/raster/04_tsunami_newlegend_data/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 7,
-          maxzoom: 12,
-        },
-        over3: {
-          type: "raster",
-          tiles: [
-            "https://disaportaldata.gsi.go.jp/raster/05_kyukeishakeikaikuiki/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 7,
-          maxzoom: 12,
-        },
-        over4: {
-          type: "raster",
-          tiles: [
-            "https://disaportaldata.gsi.go.jp/raster/05_jisuberikeikaikuiki/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-          attribution: "国土地理院",
-          minzoom: 7,
-          maxzoom: 11,
-        },
-        over5: {
-          type: "raster",
-          tiles: ["https://www.jma.go.jp/tile/jma/transparent-cities/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          attribution: "気象庁",
-          minzoom: 2,
-          maxzoom: 11,
-        },
-        hinanjo: {
-          type: "raster",
-          tiles: [
-            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVQI12NgYAAAAAMAASDVlMcAAAAASUVORK5CYII=",
-          ],
-          attribution: "国土地理院",
-          minzoom: 10,
-          maxzoom: 10,
-        },
-        knet_points: {
-          type: "geojson",
-          data: { type: "FeatureCollection", features: [] },
-        },
-        snet_points: {
-          type: "geojson",
-          data: { type: "FeatureCollection", features: [] },
-        },
-        TREMRTS_points: {
-          type: "geojson",
-          data: { type: "FeatureCollection", features: [] },
-        },
-        SEISJS_points: {
-          type: "geojson",
-          data: { type: "FeatureCollection", features: [] },
-        },
-      },
-      layers: [
-        {
-          id: "submarine",
-          type: "raster",
-          source: "submarine",
-          paint: { "raster-fade-duration": 500 },
-          layout: { visibility: high_contrast ? "none" : "visible" },
-        },
-        {
-          id: "tile0",
-          type: "raster",
-          source: "tile0",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "tile1",
-          type: "raster",
-          source: "tile1",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "tile2",
-          type: "raster",
-          source: "tile2",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "tile4",
-          type: "raster",
-          source: "tile4",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "tsunami_Yoho",
-          type: "line",
-          source: "tsunami",
-          "source-layer": "jp_tsunami",
-          layout: { "line-join": "round", "line-cap": "round", "line-round-limit": 0 },
-          paint: {
-            "line-color": config.color.Tsunami.TsunamiYohoColor,
-            "line-width": ["interpolate", ["linear"], ["zoom"], 2, 10, 5, 30, 10, 50, 13, 100, 15, 400],
-          },
-          filter: ["==", "name", ""],
-        },
-
-        {
-          id: "tsunami_Watch",
-          type: "line",
-          source: "tsunami",
-          "source-layer": "jp_tsunami",
-          layout: { "line-join": "round", "line-cap": "round", "line-round-limit": 1 },
-          paint: {
-            "line-color": config.color.Tsunami.TsunamiWatchColor,
-            "line-width": ["interpolate", ["linear"], ["zoom"], 2, 10, 5, 30, 10, 50, 13, 100, 15, 400],
-          },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "tsunami_Warn",
-          type: "line",
-          source: "tsunami",
-          "source-layer": "jp_tsunami",
-          layout: { "line-join": "round", "line-cap": "round", "line-round-limit": 0 },
-          paint: {
-            "line-color": config.color.Tsunami.TsunamiWarningColor,
-            "line-width": ["interpolate", ["linear"], ["zoom"], 2, 10, 5, 30, 10, 50, 13, 100, 15, 400],
-          },
-          filter: ["==", "name", ""],
-        },
-
-        {
-          id: "tsunami_MajorWarn",
-          type: "line",
-          source: "tsunami",
-          "source-layer": "jp_tsunami",
-          layout: { "line-join": "round", "line-cap": "round", "line-round-limit": 0 },
-          paint: {
-            "line-color": config.color.Tsunami.TsunamiMajorWarningColor,
-            "line-width": ["interpolate", ["linear"], ["zoom"], 2, 10, 5, 30, 10, 50, 13, 100, 15, 400],
-          },
-          filter: ["==", "name", ""],
-        },
-
-        {
-          id: "prefmap_fill",
-          type: "fill",
-          source: "prefmap",
-          "source-layer": "jp_pref",
-          paint: {
-            "fill-color": high_contrast ? "#000" : "#333",
-            "fill-opacity": 1,
-          },
-        },
-        {
-          id: "over0",
-          type: "raster",
-          source: "over0",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "over1",
-          type: "raster",
-          source: "over1",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "over2",
-          type: "raster",
-          source: "over2",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "over3",
-          type: "raster",
-          source: "over3",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "over4",
-          type: "raster",
-          source: "over4",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "over5",
-          type: "raster",
-          source: "over5",
-          layout: { visibility: "none" },
-        },
-        {
-          id: "basemap_LINE",
-          type: "line",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          minzoom: 6,
-          paint: {
-            "line-color": high_contrast ? "#FFF" : "#666",
-            "line-width": 1,
-          },
-        },
-        {
-          id: "Int1",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["1"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int2",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["2"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int3",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["3"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int4",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["4"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int5-",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["5m"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int5+",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["5p"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int6-",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["6m"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int6+",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["6p"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "Int7",
-          type: "fill",
-          source: "basemap",
-          "source-layer": "jp_sect",
-          paint: { "fill-color": config.color.Shindo["7"].background },
-          filter: ["==", "name", ""],
-        },
-        {
-          id: "prefmap_LINE",
-          type: "line",
-          source: "prefmap",
-          "source-layer": "jp_pref",
-          paint: {
-            "line-color": high_contrast ? "#FFF" : "#999",
-            "line-width": 1,
-          },
-        },
-        {
-          id: "worldmap_fill",
-          type: "fill",
-          source: "worldmap",
-          "source-layer": "world",
-          paint: {
-            "fill-color": high_contrast ? "#000" : "#333",
-            "fill-opacity": 1,
-          },
-        },
-        {
-          id: "worldmap_LINE",
-          type: "line",
-          source: "worldmap",
-          "source-layer": "world",
-          paint: {
-            "line-color": high_contrast ? "#FFF" : "#999",
-            "line-width": 1,
-          },
-        },
-        {
-          id: "lake_fill",
-          type: "fill",
-          source: "lake",
-          paint: {
-            "fill-color": high_contrast ? "#FFF" : "#325385",
-            "fill-opacity": high_contrast ? 1 : 0.5,
-          },
-          minzoom: 6,
-        },
-        {
-          "id": "河川中心線",
-          "type": "line",
-          "source": "v",
-          "source-layer": "RvrCL",
-          "filter": ["!", ["in", ["get", "vt_code"], ["literal", [5302, 5322]]]],
-          "paint": { "line-color": "#2468cb66", "line-width": 2 },
-          "layout": { visibility: "none" },
-        },
-        {
-          "id": "水涯線",
-          "type": "line",
-          "source": "v",
-          "source-layer": "WL",
-          "paint": { "line-color": "#2468cb66", "line-width": 2 },
-          "layout": { visibility: "none" },
-        },
-        {
-          "id": "道路中心線ZL4-10国道・高速",
-          "maxzoom": 11,
-          "minzoom": 9,
-          "type": "line",
-          "source": "v",
-          "source-layer": "RdCL",
-          "filter": ["any", ["in", ["get", "vt_rdctg"], ["literal", ["主要道路", "国道", "都道府県道", "市区町村道等"]],], ["==", ["get", "vt_rdctg"], "高速自動車国道等"],
-          ],
-          "layout": {
-            "line-cap": "round",
-            "line-join": "round",
-            "line-sort-key": ["get", "vt_drworder"],
-            "visibility": "none",
-          },
-          "paint": { "line-color": "#80808066", "line-width": 3 },
-        },
-        {
-          "id": "道路中心線色0",
-          "minzoom": 11,
-          "maxzoom": 17,
-          "type": "line",
-          "source": "v",
-          "source-layer": "RdCL",
-          "filter": ["any", ["step", ["zoom"], ["all", ["==", ["get", "vt_lvorder"], 0], ["!", ["in", ["get", "vt_code"], ["literal", [2703, 2713, 2723, 2733, 2724, 2734]],],],], 17, ["all", ["in", ["get", "vt_flag17"], ["literal", [1, 2]]], ["!", ["in", ["get", "vt_code"], ["literal", [2724, 2734]]]],],], ["all", ["==", ["get", "vt_lvorder"], 0], ["in", ["get", "vt_code"], ["literal", [2703, 2713, 2723, 2733]]],],],
-          "layout": {
-            "line-join": "round",
-            "line-round-limit": 1.57,
-            "line-sort-key": ["get", "vt_drworder"],
-            "visibility": "none",
-          },
-          "paint": { "line-color": "#80808066", "line-width": 2 },
-        },
-        {
-          "id": "鉄道中心線",
-          "minzoom": 11,
-          "maxzoom": 17,
-          "type": "line",
-          "source": "v",
-          "source-layer": "RailCL",
-          "filter": ["any", ["all", ["!", ["in", ["get", "vt_railstate"], ["literal", ["トンネル", "雪覆い", "地下", "橋・高架"]],],], ["==", ["get", "vt_lvorder"], 0],], ["all", ["==", ["get", "vt_railstate"], "橋・高架"], ["==", ["get", "vt_lvorder"], 0],], ["all", ["!", ["in", ["get", "vt_railstate"], ["literal", ["トンネル", "雪覆い", "地下", "橋・高架"]],],], ["==", ["get", "vt_lvorder"], 1],],],
-          "paint": {
-            "line-color": "#80808066",
-            "line-width": 2.5,
-            "line-dasharray": [1, 1],
-          },
-          "layout": { visibility: "none" },
-        },
-        {
-          "id": "建築物0",
-          "type": "fill",
-          "source": "v",
-          "source-layer": "BldA",
-          "filter": ["==", ["get", "vt_lvorder"], 0],
-          "paint": { "fill-color": "#80808033" },
-          "layout": { visibility: "none" },
-        },
-        {
-          "id": "道路中心線色1",
-          "minzoom": 11,
-          "maxzoom": 17,
-          "type": "line",
-          "source": "v",
-          "source-layer": "RdCL",
-          "filter": ["all", ["==", ["get", "vt_lvorder"], 1], ["!", ["in", ["get", "vt_code"], ["literal", [2703, 2713, 2723, 2733, 2724, 2734]],],],],
-          "layout": {
-            "visibility": "none",
-            "line-join": "round",
-            "line-round-limit": 1.57,
-            "line-sort-key": ["get", "vt_drworder"],
-          },
-          "paint": {
-            "line-color": "#80808066",
-            "line-width": 4,
-            "line-dasharray": [1, 1],
-          },
-        },
-        {
-          "id": "道路中心線色橋1",
-          "minzoom": 11,
-          "maxzoom": 17,
-          "type": "line",
-          "source": "v",
-          "source-layer": "RdCL",
-          "filter": ["all", ["==", ["get", "vt_lvorder"], 1], ["in", ["get", "vt_code"], ["literal", [2703, 2713, 2723, 2733]]],],
-          "layout": {
-            "line-join": "round",
-            "line-round-limit": 1.57,
-            "line-sort-key": ["get", "vt_drworder"],
-            "visibility": "none",
-          },
-          "paint": { "line-color": "#80808066", "line-width": 1.5 },
-        },
-        {
-          "id": "道路縁",
-          "minzoom": 17,
-          "type": "line",
-          "source": "v",
-          "source-layer": "RdEdg",
-          "layout": {
-            "line-cap": "square",
-            "line-sort-key": ["get", "vt_drworder"],
-            "visibility": "none",
-          },
-          "paint": { "line-color": "#80808066", "line-width": 1.5 },
-        },
-        {
-          "id": "行政区画界線25000市区町村界",
-          "type": "line",
-          "source": "v",
-          "source-layer": "AdmBdry",
-          "filter": ["==", ["get", "vt_code"], 1212],
-          "layout": { "line-cap": "square", "visibility": "none" },
-          "paint": { "line-color": "#666666", "line-width": 1 },
-        },
-        // prettier-ignore
-        {
-          id: "hinanjo",
-          type: "raster",
-          source: "hinanjo",
-          layout: { visibility: "none" },
-          minzoom: 10,
-        },
-        {
-          id: "knet_points",
-          type: "circle",
-          source: "knet_points",
-          layout: {
-            visibility: config.data.kmoni_points_show ? "visible" : "none",
-          },
-          //色・可視・検知枠は feature-state で毎秒更新する（Feature 集合は起動時に 1 回だけ構築。Issue #18）
-          paint: KMONI_FEATURE_STATE_PAINT(true),
-        },
-        {
-          id: "snet_points",
-          type: "circle",
-          source: "snet_points",
-          layout: {
-            visibility: config.data.kmoni_points_show ? "visible" : "none",
-          },
-          paint: {
-            "circle-color": [
-              "rgb",
-              ["at", 0, ["get", "rgb"]],
-              ["at", 1, ["get", "rgb"]],
-              ["at", 2, ["get", "rgb"]],
-            ],
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 1, 5, 3.75, 15, 33.75,],
-          },
-        },
-        {
-          id: "TREMRTS_points",
-          type: "circle",
-          source: "TREMRTS_points",
-          layout: {
-            visibility: config.data.kmoni_points_show ? "visible" : "none",
-          },
-          paint: KMONI_FEATURE_STATE_PAINT(false),
-        },
-        {
-          id: "SEISJS_points",
-          type: "circle",
-          source: "SEISJS_points",
-          layout: {
-            visibility: config.data.kmoni_points_show ? "visible" : "none",
-          },
-          paint: {
-            "circle-color": [
-              "rgb",
-              ["at", 0, ["get", "rgb"]],
-              ["at", 1, ["get", "rgb"]],
-              ["at", 2, ["get", "rgb"]],
-            ],
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 1, 5, 3.75, 15, 33.75,],
-          },
-        },
-        { "id": "注記シンボル付きソート順100以上", "type": "symbol", "source": "v", "source-layer": "Anno", "filter": ["step", ["zoom"], ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_code"], ["literal", [653, 661, 662, 3201, 3202, 3203, 3204, 3211, 3215, 3216, 3217, 3218, 3231, 3232, 3242, 3243, 3244, 3261, 4101, 4102, 4103, 4104, 4105, 6301, 6311, 6312, 6313, 6314, 6321, 6322, 6323, 6324, 6325, 6326, 6327, 6332, 6342, 6351, 6362, 7101, 7102, 7103, 7711, 8103, 8105]]]], 16, ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_flag17"], ["literal", [0, 1]]], ["in", ["get", "vt_code"], ["literal", [653, 661, 662, 3201, 3202, 3203, 3204, 3211, 3215, 3216, 3217, 3218, 3231, 3232, 3242, 3243, 3244, 3261, 4101, 4102, 4103, 4104, 4105, 6301, 6311, 6312, 6313, 6314, 6321, 6322, 6323, 6324, 6325, 6326, 6327, 6332, 6342, 6351, 6362, 7101, 7102, 7103, 7711, 8103, 8105]]]], 17, ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_flag17"], ["literal", [1, 2]]], ["in", ["get", "vt_code"], ["literal", [653, 661, 662, 3201, 3202, 3203, 3204, 3211, 3215, 3216, 3217, 3218, 3231, 3232, 3242, 3243, 3244, 3261, 4101, 4102, 4103, 4104, 4105, 6301, 6311, 6312, 6313, 6314, 6321, 6322, 6323, 6324, 6325, 6326, 6327, 6332, 6342, 6351, 6362, 7101, 7102, 7103, 7711, 8103, 8105]]]]], "layout": { "visibility": "none", "text-allow-overlap": false, "text-font": ["match", ["get", "vt_code"], [321, 322, 341, 342, 344, 345, 347, 820, 840, 841, 842], ["literal", ["NotoSerifJP-SemiBold"]], ["literal", ["NotoSansJP-Regular"]]], "text-justify": "auto", "text-size": ["let", "size", ["match", ["get", "vt_code"], [361, 1403, 7101, 7102, 7103, 7201, 7221], 10, [334, 730], 11, [312, 313, 314, 315, 316, 322, 323, 332, 342, 353, 412, 533, 621, 631, 632, 633, 634, 653, 654, 720, 999, 2941, 2942, 2943, 2944, 2945], 12, [343, 1402, 7711], 13, [311, 346, 347, 413, 422, 1303], 14, [210, 220, 321, 331, 352, 411, 421, 423, 431, 432, 441, 511, 521, 522, 523, 531, 532, 534, 611, 612, 613, 615, 651, 661, 662, 671, 672, 673, 681, 1302], 15, [130, 1301, 1401], 16, [140, 333, 351], 18, [110, 120, 341, 344, 345], 20, [348, 800, 810, 820, 822, 830, 831, 832, 833, 840, 841, 842, 843, 850, 860, 870, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 899], 24, 10], ["interpolate", ["linear"], ["zoom"], 4, ["*", 0.6, ["var", "size"]], 8, ["var", "size"], 11, ["match", ["get", "vt_code"], [1401, 1402, 1403], 20, 422, ["*", 0.7, ["var", "size"]], ["var", "size"]], 12, ["var", "size"], 14, ["var", "size"], 17, ["match", ["get", "vt_code"], [412, 422], ["*", 2, ["var", "size"]], ["var", "size"]]]], "text-field": ["get", "vt_text"], "text-max-width": 100, "text-radial-offset": 0.5, "text-variable-anchor": ["top", "bottom", "left", "right"], "text-writing-mode": ["horizontal"] }, "paint": { "text-color": ["let", "color", ["match", ["get", "vt_code"], 521, "rgba(80,80,80,1)", 348, "rgba(150,150,150,1)", [411, 412, 413, 421, 422, 423, 431, 432, 441, 860, 2941, 2942, 2943, 2944, 2945], "rgba(230,230,230,1)", [7372, 7711], "rgba(80,80,80,1)", 7352, "rgba(50,50,50,1)", [2901, 2903, 2904], "rgba(255,255,255,1)", [321, 322, 341, 344, 345, 820, 840, 841], "rgba(80,80,80,1)", 220, "rgba(150,150,150,1)", 312, "rgba(150,150,150,1)", [333, 346], "rgba(150,150,150,1)", [511, 522, 523, 531, 532, 534, 611, 612, 613, 614, 615, 621, 623, 631, 632, 633, 634, 641, 642, 651, 652, 653, 654, 661, 662, 671, 672, 673, 681, 720, 730, 870, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 899, 999, 3201, 3202, 3203, 3204, 3205, 3206, 3211, 3212, 3213, 3214, 3215, 3216, 3217, 3218, 3221, 3231, 3232, 3241, 3242, 3243, 3244], "rgba(150,150,150,1)", "rgba(200,200,200,1)"], ["step", ["zoom"], ["match", ["get", "vt_code"], [661, 662], "rgba(200,200,200,0)", ["var", "color"]], 14, ["match", ["get", "vt_code"], [3201, 3204, 3215, 3216, 3217, 3218, 3243], "rgba(200,200,200,0)", ["var", "color"]]]], "text-halo-color": ["step", ["zoom"], ["match", ["get", "vt_code"], [661, 662], "rgba(50,50,50,0)", "rgba(50,50,50,1)"], 14, ["match", ["get", "vt_code"], [3201, 3204, 3215, 3216, 3217, 3218, 3243], "rgba(50,50,50,0)", "rgba(50,50,50,1)"]], "text-halo-width": 1 } },
-        { "id": "注記シンボル付きソート順100未満", "type": "symbol", "source": "v", "source-layer": "Anno", "filter": ["step", ["zoom"], ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_code"], ["literal", [621, 631, 632, 633, 1301, 1302, 1303, 1401, 1402, 1403, 2941, 2942, 2945, 3205, 3206, 3212, 3213, 3214, 3221, 3241, 6331, 6361, 6367, 6368, 6371, 6373, 6375, 6376, 6381, 7201, 7221]]]], 16, ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_flag17"], ["literal", [0, 1]]], ["in", ["get", "vt_code"], ["literal", [621, 631, 632, 633, 1301, 1302, 1303, 1401, 1402, 1403, 2941, 2942, 2945, 3205, 3206, 3212, 3213, 3214, 3221, 3241, 6331, 6361, 6367, 6368, 6371, 6373, 6375, 6376, 6381, 7201, 7221]]]], 17, ["all", ["==", ["geometry-type"], "Point"], ["in", ["get", "vt_flag17"], ["literal", [1, 2]]], ["in", ["get", "vt_code"], ["literal", [621, 631, 632, 633, 1301, 1302, 1303, 1401, 1402, 1403, 2941, 2942, 2945, 3205, 3206, 3212, 3213, 3214, 3221, 3241, 6331, 6361, 6367, 6368, 6371, 6373, 6375, 6376, 6381, 7201, 7221]]]]], "layout": { "visibility": "none", "text-allow-overlap": false, "text-font": ["match", ["get", "vt_code"], [321, 322, 341, 342, 344, 345, 347, 820, 840, 841, 842], ["literal", ["NotoSerifJP-SemiBold"]], ["literal", ["NotoSansJP-Regular"]]], "text-justify": "auto", "text-size": ["let", "size", ["match", ["get", "vt_code"], [361, 1403, 7101, 7102, 7103, 7201, 7221], 10, [334, 730], 11, [312, 313, 314, 315, 316, 322, 323, 332, 342, 353, 412, 533, 621, 631, 632, 633, 634, 653, 654, 720, 999, 2941, 2942, 2943, 2944, 2945], 12, [343, 1402, 7711], 13, [311, 346, 347, 413, 422, 1303], 14, [210, 220, 321, 331, 352, 411, 421, 423, 431, 432, 441, 511, 521, 522, 523, 531, 532, 534, 611, 612, 613, 615, 651, 661, 662, 671, 672, 673, 681, 1302], 15, [130, 1301, 1401], 16, [140, 333, 351], 18, [110, 120, 341, 344, 345], 20, [348, 800, 810, 820, 822, 830, 831, 832, 833, 840, 841, 842, 843, 850, 860, 870, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 899], 24, 10], ["interpolate", ["linear"], ["zoom"], 4, ["*", 0.6, ["var", "size"]], 8, ["var", "size"], 11, ["match", ["get", "vt_code"], [1401, 1402, 1403], 20, 422, ["*", 0.7, ["var", "size"]], ["var", "size"]], 12, ["var", "size"], 14, ["match", ["get", "vt_code"], [2941, 2942], ["*", 1.3, ["var", "size"]], ["var", "size"]], 17, ["match", ["get", "vt_code"], [412, 422], ["*", 2, ["var", "size"]], ["var", "size"]]]], "text-field": ["get", "vt_text"], "text-max-width": 100, "text-radial-offset": 0.5, "text-variable-anchor": ["top", "bottom", "left", "right"], "text-writing-mode": ["horizontal"] }, "paint": { "text-color": ["let", "color", ["match", ["get", "vt_code"], 521, "rgba(80,80,80,1)", 348, "rgba(150,150,150,1)", [411, 412, 413, 421, 422, 423, 431, 432, 441, 860, 2941, 2942, 2943, 2944, 2945], "rgba(230,230,230,1)", [7372, 7711], "rgba(80,80,80,1)", 7352, "rgba(50,50,50,1)", [2901, 2903, 2904], "rgba(255,255,255,1)", [321, 322, 341, 344, 345, 820, 840, 841], "rgba(80,80,80,1)", 220, "rgba(150,150,150,1)", 312, "rgba(150,150,150,1)", [333, 346], "rgba(150,150,150,1)", [511, 522, 523, 531, 532, 534, 611, 612, 613, 614, 615, 621, 623, 631, 632, 633, 634, 641, 642, 651, 652, 653, 654, 661, 662, 671, 672, 673, 681, 720, 730, 870, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 899, 999, 3201, 3202, 3203, 3204, 3205, 3206, 3211, 3212, 3213, 3214, 3215, 3216, 3217, 3218, 3221, 3231, 3232, 3241, 3242, 3243, 3244], "rgba(150,150,150,1)", "rgba(200,200,200,1)"], ["step", ["zoom"], ["match", ["get", "vt_code"], [631, 632, 633, 6368, 6376], "rgba(200,200,200,0)", ["var", "color"]], 14, ["match", ["get", "vt_code"], [3212, 3213, 3214], "rgba(200,200,200,0)", ["var", "color"]]]], "text-halo-color": ["step", ["zoom"], ["match", ["get", "vt_code"], [631, 632, 633, 6368, 6376], "rgba(50,50,50,0)", "rgba(50,50,50,1)"], 14, ["match", ["get", "vt_code"], [3212, 3213, 3214], "rgba(50,50,50,0)", "rgba(50,50,50,1)"]], "text-halo-width": 1 } }
-      ],
-    },
+    style: style,
   });
   map.addControl(
     new maplibregl.AttributionControl({ compact: true, }),
@@ -1561,60 +1187,54 @@ function init() {
   map_gethome();
 
   map.on("click", "prefmap_fill", function (e) {
-    e.originalEvent.cancelBubble = true;
+    e.originalEvent?.stopPropagation();
   });
-  /**
-   * 観測点ポップアップを開く（既存なら再表示）。close 時にキャッシュから削除する（Issue #23）
-   * @param {string} code 観測点コード
-   * @param {[number, number]} lngLat 座標
-   * @param {string} html 内容
-   */
-  function openPointPopup(code, lngLat, html) {
-    if (kmoni_popup[code] && kmoni_popup[code].isOpen()) return;
-    if (kmoni_popup[code]) {
-      kmoni_popup[code].setHTML(html).addTo(map);
-    } else {
-      var popup = new maplibregl.Popup().setLngLat(lngLat).setHTML(html).addTo(map);
-      popup.on("close", function () {
-        if (kmoni_popup[code] === popup) delete kmoni_popup[code];
-      });
-      kmoni_popup[code] = popup;
-    }
-  }
-
-  map.on("click", "knet_points", function (e) {
-    var f = e.features[0];
-    var params = kmoniPointParams(f.id);
-    if (!params || !params.data) return; //不可視（valid=0）の点は無視
-    openPointPopup(params.Code, f.geometry.coordinates, generatePopupContent_K(params));
-    e.originalEvent.cancelBubble = true;
-  });
-  map.on("click", "snet_points", function (e) {
+  var nied_popup = function (e) {
     var elm = e.features[0].properties;
-    openPointPopup(elm.Code, e.features[0].geometry.coordinates, generatePopupContent_K(elm));
-    e.originalEvent.cancelBubble = true;
-  });
+    if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) return;
+    var popupContent = generatePopupContent_K(elm);
+    if (kmoni_popup[elm.Code]) {
+      kmoni_popup[elm.Code].setHTML(popupContent).addTo(map);
+    } else {
+      kmoni_popup[elm.Code] = new maplibregl.Popup()
+        .setLngLat(e.features[0].geometry.coordinates)
+        .setHTML(popupContent)
+        .addTo(map);
+    }
+    e.originalEvent?.stopPropagation();
+  };
+  map.on("click", "knet_points", nied_popup);
+  map.on("click", "snet_points", nied_popup);
   map.on("click", "TREMRTS_points", function (e) {
-    var f = e.features[0];
-    var params = TREMRTSPointParams(f.id);
-    if (!params) return; //未報告（valid=0）の点は無視
-    openPointPopup(params.Code, f.geometry.coordinates, generatePopupContent_TREM(params));
-    e.originalEvent.cancelBubble = true;
+    var elm = e.features[0].properties;
+    if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) return;
+    var popupContent = generatePopupContent_TREM(elm);
+    if (kmoni_popup[elm.Code]) {
+      kmoni_popup[elm.Code].setHTML(popupContent).addTo(map);
+    } else {
+      kmoni_popup[elm.Code] = new maplibregl.Popup()
+        .setLngLat(e.features[0].geometry.coordinates)
+        .setHTML(popupContent)
+        .addTo(map);
+    }
+    e.originalEvent?.stopPropagation();
   });
   map.on("click", "SEISJS_points", function (e) {
     var elm = e.features[0].properties;
-    openPointPopup(elm.Code, e.features[0].geometry.coordinates, generatePopupContent_SEISJS(elm));
-    e.originalEvent.cancelBubble = true;
+    if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) return;
+    var popupContent = generatePopupContent_SEISJS(elm);
+    if (kmoni_popup[elm.Code]) {
+      kmoni_popup[elm.Code].setHTML(popupContent).addTo(map);
+    } else {
+      kmoni_popup[elm.Code] = new maplibregl.Popup()
+        .setLngLat(e.features[0].geometry.coordinates)
+        .setHTML(popupContent)
+        .addTo(map);
+    }
+    e.originalEvent?.stopPropagation();
   });
 
-  //避難所オーバーレイ: 固定 2 source + 2 layer に統合し、タイル毎の source/layer/listener 増殖を防ぐ（Issue #22）
-  //source/layer の追加はスタイル読込後（map.on("load") 内）で行う
-  map.on("sourcedataloading", (e) => {
-    if (!map) return;
-    if (e.sourceId == "hinanjo" && config.data.overlay.includes("hinanjo") && e.tile != undefined) {
-      hinanjoLoadTile(e.tile.tileID.canonical);
-    }
-  });
+  setupHinanjoLoader(map, config, hinanjoLayers, hinanjoPopup);
 
   map.addControl(new maplibregl.NavigationControl(), "top-right");
 
@@ -1737,7 +1357,11 @@ function init() {
   };
   zoomLevelContinue();
   map.on("load", async () => {
-    hinanjoInitLayers();
+    if (KNET_geometry) map.getSource("knet_points")?.setData(KNET_geometry);
+    if (Snet_geometry) map.getSource("snet_points")?.setData(Snet_geometry);
+    if (TREMRTS_geometry) map.getSource("TREMRTS_points")?.setData(TREMRTS_geometry);
+    if (SeisJS_geometry) map.getSource("SEISJS_points")?.setData(SeisJS_geometry);
+
     var image = await map.loadImage("./img/AlertOverlay.png");
     map.addImage("pattern", image.data);
     map.addLayer(
@@ -1824,349 +1448,200 @@ function map_gethome() {
 
 //観測点情報更新
 var kmoni_popup = {};
+function kmoniMapUpdate(points, type) {
+  if (!Array.isArray(points)) return;
+  if (!map) return;
 
-/**
- * feature-state ベースの観測点レイヤ paint 定義（Issue #18）。
- * 値未設定（state 未投入）の点は coalesce で 0 に落とし、valid=0 の点は透明にする。
- * @param {boolean} withDetectStroke 検知レベルの枠線を描くか（K-NET のみ）
- * @returns {object} paint 定義
- */
-function KMONI_FEATURE_STATE_PAINT(withDetectStroke) {
-  var visible = ["case", ["==", ["coalesce", ["feature-state", "valid"], 0], 1], 1, 0];
-  var paint = {
-    "circle-color": [
-      "rgb",
-      ["coalesce", ["feature-state", "r"], 0],
-      ["coalesce", ["feature-state", "g"], 0],
-      ["coalesce", ["feature-state", "b"], 0],
-    ],
-    "circle-opacity": visible,
-    "circle-radius": ["interpolate", ["linear"], ["zoom"], 2, 1, 5, 3.75, 15, 33.75,],
-  };
-  if (withDetectStroke) {
-    paint["circle-stroke-width"] = 2;
-    paint["circle-stroke-opacity"] = visible;
-    paint["circle-stroke-color"] = ["match", ["coalesce", ["feature-state", "detectLv"], 0], 0, "transparent", 1, "#cb732b", 2, "#cb2b2b", "#0000",];
+  if (type == "knet") {
+    points.forEach(function (elm, i) {
+      var currentState = map.getFeatureState({ source: "knet_points", id: elm.Code });
+      var isVisible = Boolean(elm.data);
+      if (currentState.shindo !== elm.shindo || currentState.isTriggered !== elm.isTriggered || currentState.visible !== isVisible) {
+        map.setFeatureState(
+          {
+            source: "knet_points",
+            id: elm.Code
+          },
+          {
+            visible: isVisible,
+            isTriggered: elm?.isTriggered,
+            rgb_r: elm?.rgb?.[0] || 0,
+            rgb_g: elm?.rgb?.[1] || 0,
+            rgb_b: elm?.rgb?.[2] || 0,
+            shindo: elm.shindo,
+          }
+        );
+      }
+
+      if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) {
+        kmoni_popup[elm.Code].setHTML(generatePopupContent_K(elm));
+      }
+    });
+
+  } else {
+    points.forEach(function (elm) {
+      var currentState = map.getFeatureState({ source: "snet_points", id: elm.Code });
+      var isVisible = Boolean(elm.data);
+      if (currentState.shindo !== elm.shindo || currentState.visible !== isVisible) {
+        map.setFeatureState(
+          {
+            source: "snet_points",
+            id: elm.Code
+          },
+          {
+            visible: isVisible,
+            rgb_r: elm?.rgb?.[0],
+            rgb_g: elm?.rgb?.[1],
+            rgb_b: elm?.rgb?.[2],
+            shindo: elm.shindo,
+          }
+        );
+      }
+      if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) {
+        kmoni_popup[elm.Code].setHTML(generatePopupContent_K(elm));
+      }
+    });
   }
-  return paint;
-}
-
-/* ---------- K-NET/KiK-net: マスタ 1 回 + feature-state 差分更新（Issue #18/#19） ---------- */
-
-/** 観測点マスタ（main から受信。index が TypedArray の座標系） */
-var kmoniMaster = null;
-/** 最新の kmoniUpdate メッセージ（activate 時の全点復元用） */
-var kmoniLatest = null;
-/** 前回反映した値（差分判定用） */
-var kmoniPrev = null;
-/** 次回更新で全点を強制反映する（background 復帰・マスタ再構築時） */
-var kmoniForceAll = true;
-
-/**
- * 観測点マスタから GeoJSON ソースを 1 回だけ構築する。
- * WorkerWindow の reload 等で再送された場合は再構築し、state を全点強制反映に戻す。
- * @param {Array<object>} master 観測点マスタ
- */
-function kmoniSetMaster(master) {
-  if (!Array.isArray(master) || master.length === 0) return;
-  kmoniMaster = master;
-  kmoniPrev = null;
-  kmoniForceAll = true;
-  if (!map || !map.getSource("knet_points")) return;
-  map.getSource("knet_points").setData({
-    type: "FeatureCollection",
-    features: master.map(function (elm, i) {
-      return {
-        type: "Feature",
-        id: i,
-        properties: { Code: elm.Code, Name: elm.Name, Region: elm.Region, Type: elm.Type, IsSuspended: elm.IsSuspended, checked: elm.checked },
-        geometry: { type: "Point", coordinates: [elm.Location.Longitude, elm.Location.Latitude] },
-      };
-    }),
-  });
-  if (kmoniLatest) kmoniApplyUpdate(kmoniLatest);
-}
-
-/**
- * knet_points の feature-state を全消去し、次回更新で全点を再送する（Replay 時）
- */
-function kmoniResetState() {
-  kmoniPrev = null;
-  kmoniForceAll = true;
-  if (map && map.getSource("knet_points")) map.removeFeatureState({ source: "knet_points" });
-}
-
-/**
- * 毎秒の値を feature-state として反映する。変化した点のみ setFeatureState を呼ぶ。
- * @param {{shindo:Float32Array, pga:Float32Array, rgb:Uint8Array, valid:Uint8Array, detectLv:Uint8Array}} msg
- */
-function kmoniApplyUpdate(msg) {
-  if (!msg || !msg.shindo || !msg.valid || !msg.rgb) return;
-  kmoniLatest = msg;
-  if (!kmoniMaster || msg.shindo.length !== kmoniMaster.length) return; //マスタ未受信・不一致は破棄
-  if (background) return; //バックグラウンド中は描画しない（復帰時に kmoniForceAll で全点反映）
-  if (!map || !map.getSource("knet_points")) return;
-
-  var n = kmoniMaster.length;
-  var rgb = msg.rgb, valid = msg.valid, detectLv = msg.detectLv, shindo = msg.shindo, pga = msg.pga;
-  var prev = kmoniPrev;
-  var force = kmoniForceAll || !prev;
-  if (!prev) prev = kmoniPrev = { rgb: new Uint8Array(n * 3), valid: new Uint8Array(n), detectLv: new Uint8Array(n) };
-
-  for (let i = 0; i < n; i++) {
-    var lv = detectLv ? detectLv[i] : 0;
-    var r = rgb[3 * i], g = rgb[3 * i + 1], b = rgb[3 * i + 2];
-    if (!force && prev.valid[i] === valid[i] && prev.detectLv[i] === lv &&
-      prev.rgb[3 * i] === r && prev.rgb[3 * i + 1] === g && prev.rgb[3 * i + 2] === b) continue;
-    map.setFeatureState({ source: "knet_points", id: i }, { r: r, g: g, b: b, valid: valid[i], detectLv: lv, shindo: shindo[i], pga: pga ? pga[i] : 0 });
-    prev.valid[i] = valid[i];
-    prev.detectLv[i] = lv;
-    prev.rgb[3 * i] = r; prev.rgb[3 * i + 1] = g; prev.rgb[3 * i + 2] = b;
-  }
-  kmoniForceAll = false;
-
-  //開いているポップアップのみ内容を更新する
-  for (const code of Object.keys(kmoni_popup)) {
-    var idx = kmoniIndexByCode(code);
-    if (idx < 0) continue;
-    var popup = kmoni_popup[code];
-    if (popup && popup.isOpen()) popup.setHTML(generatePopupContent_K(kmoniPointParams(idx)));
-  }
-}
-
-var kmoniCodeIndex = null;
-/**
- * 観測点コードから index を求める（初回に逆引きマップを構築）
- * @param {string} code 観測点コード
- * @returns {number} index。見つからなければ -1
- */
-function kmoniIndexByCode(code) {
-  if (!kmoniMaster) return -1;
-  if (!kmoniCodeIndex || kmoniCodeIndex.master !== kmoniMaster) {
-    var m = new Map();
-    kmoniMaster.forEach(function (elm, i) { m.set(elm.Code, i); });
-    kmoniCodeIndex = { master: kmoniMaster, map: m };
-  }
-  var i = kmoniCodeIndex.map.get(code);
-  return i === undefined ? -1 : i;
-}
-
-/**
- * index から、ポップアップ生成に必要な観測点情報（マスタ + 最新値）を組み立てる
- * @param {number} i index
- * @returns {object|null}
- */
-function kmoniPointParams(i) {
-  if (!kmoniMaster || typeof i !== "number" || i < 0 || i >= kmoniMaster.length) return null;
-  var m = kmoniMaster[i];
-  var latest = kmoniLatest;
-  var valid = latest && latest.valid ? latest.valid[i] === 1 : false;
-  return {
-    Code: m.Code, Name: m.Name, Region: m.Region, Type: m.Type, IsSuspended: m.IsSuspended, checked: m.checked,
-    data: valid,
-    shindo: latest && latest.shindo ? latest.shindo[i] : null,
-    pga: latest && latest.pga ? latest.pga[i] : null,
-    rgb: latest && latest.rgb ? [latest.rgb[3 * i], latest.rgb[3 * i + 1], latest.rgb[3 * i + 2]] : [128, 128, 128],
-  };
-}
-
-/**
- * S-net 観測点の更新（現行方式: 10 秒間隔・156 点のため setData のまま）
- * @param {{data: object[]}} dataTmp
- * @param {string} type "snet"
- */
-function kmoniMapUpdate(dataTmp, type) {
-  if (!dataTmp || !dataTmp.data || background) return;
-  if (type !== "snet") return;
-  var geojson = { type: "FeatureCollection", features: [] };
-  snetMapData = dataTmp;
-
-  dataTmp.data.forEach(function (elm) {
-    if (elm.data) {
-      geojson.features.push({
-        type: "Feature",
-        properties: {
-          Code: elm.Code,
-          Type: elm.Type,
-          data: elm.data,
-          pga: elm.pga,
-          rgb: elm.rgb,
-          shindo: elm.shindo,
-        },
-        geometry: {
-          type: "Point",
-          coordinates: [elm.Location.Longitude, elm.Location.Latitude],
-        },
-      });
-    }
-    if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) {
-      kmoni_popup[elm.Code].setHTML(generatePopupContent_K(elm));
-    }
-  });
-  if (map) map.getSource("snet_points").setData(geojson);
 }
 function generatePopupContent_K(params) {
-  if (params.data) {
-    if (!Array.isArray(params.rgb)) {
-      params.rgb = JSON.parse(params.rgb);
-    }
-    var content = `<h3 class='PointName' style='border-bottom-color:rgb(${params.rgb.join(",")})'>${params.Name || ""}<span>${params.Type}_${params.Code}</span></h3>`;
-  } else {
-    var content = `<h3 class='PointName' style='border-bottom:solid 2px rgba(128,128,128,0.5)'>${params.Name || ""}<span>${params.Type}_${params.Code}</span></h3>`
-  }
+  if (!map?.style?._loaded) return "";
+  var targetSource = (params.Type == "S-net" || params.Type == "Sagami") ? "snet_points" : "knet_points";
+  var state = map.getFeatureState({ source: targetSource, id: params.Code });
+
+  var rgb = `${state.rgb_r || 0},${state.rgb_g || 0},${state.rgb_b || 0}`;
+  var content = `<h3 class='PointName' style='border-bottom-color:rgb(${rgb})'>${params.Name || ""}<span>${params.Type}_${params.Code}</span></h3>`;
 
   return content;
 }
 
 function generatePopupContent_TREM(params) {
-  var shindoColor = NormalizeShindo(params.shindo, 2);
-  if (!Array.isArray(params.rgb)) params.rgb = JSON.parse(params.rgb);
-  return `<h3 class='PointName' style='border-bottom-color:rgb(${params.rgb.join(",")})'>
+  if (!map?.style?._loaded) return "";
+  var state = map.getFeatureState({ source: "TREMRTS_points", id: params.Code });
+
+  var shindoColor = NormalizeShindo(state.shindo, 2);
+  var rgb = `${state.rgb_r || 0},${state.rgb_g || 0},${state.rgb_b || 0}`;
+  return `<h3 class='PointName' style='border-bottom-color:rgb(${rgb})'>
       <span>${params.Type}_${params.Code}</span></h3><div class='popupContentWrap'>
-        <div class='obsShindoWrap' style='background:${shindoColor[0]};color:${shindoColor[1]};'>震度 ${NormalizeShindo(params.shindo, 1)}
-          <span>${params.shindo.toFixed(2)}</span></div>
-        <div class='obsPGAWrap'>PGA ${(Math.floor(params.PGA * 100) / 100).toFixed(2)}</div></div>`;
+        <div class='obsShindoWrap' style='background:${shindoColor[0]};color:${shindoColor[1]};'>震度 ${NormalizeShindo(state.shindo, 1)}
+          <span>${Number(state.shindo || 0).toFixed(2)}</span></div>
+        <div class='obsPGAWrap'>PGA ${Number(state.PGA).toFixed(2)}</div></div>`;
 }
 
-/* ---------- TREM-RTS: マスタ受信時 setData + 毎秒 feature-state（ハイブリッド。doc/PERF_FIX_DESIGN.md 2.5 章） ---------- */
-
-/** TREM-RTS 観測点マスタ [{Code, lon, lat}]（main から受信） */
-var tremMaster = null;
-/** Code → index */
-var tremIndexByCode = new Map();
-/** 前回報告があった index の集合（今回無ければ valid=0 にする） */
-var tremPrevReported = new Set();
-/** 前回反映した値（差分判定用）: index → [shindo, pga, r, g, b] */
-var tremPrevValues = new Map();
-var tremForceAll = true;
-
-/**
- * TREM-RTS 観測点マスタから GeoJSON ソースを構築する（マスタ受信・再取得時）
- * @param {Array<{Code:string, lon:number, lat:number}>} master
- */
-function TREMRTSSetMaster(master) {
-  if (!Array.isArray(master)) return;
-  tremMaster = master;
-  tremIndexByCode = new Map();
-  master.forEach(function (elm, i) { tremIndexByCode.set(elm.Code, i); });
-  tremPrevReported = new Set();
-  tremPrevValues = new Map();
-  tremForceAll = true;
-  if (!map || !map.getSource("TREMRTS_points")) return;
-  map.getSource("TREMRTS_points").setData({
-    type: "FeatureCollection",
-    features: master.map(function (elm, i) {
-      return {
-        type: "Feature",
-        id: i,
-        properties: { Code: elm.Code, Type: "TREMRTS" },
-        geometry: { type: "Point", coordinates: [elm.lon, elm.lat] },
-      };
-    }),
-  });
-  if (TREMRTS_TMP) TREMRTSUpdate(TREMRTS_TMP);
-}
-
-/**
- * TREMRTS_points の feature-state を全消去し、次回更新で全点を再送する（Replay 時）
- */
-function TREMRTSResetState() {
-  tremPrevReported = new Set();
-  tremPrevValues = new Map();
-  tremForceAll = true;
-  if (map && map.getSource("TREMRTS_points")) map.removeFeatureState({ source: "TREMRTS_points" });
-}
-
-/**
- * 毎秒の TREM-RTS 値を feature-state に反映する。
- * @param {Record<string, [number, number, number, number, number]>} dataTmp StID → [shindo, pga, r, g, b]
- */
+var TREMRTS_LastUpdate = {};
 function TREMRTSUpdate(dataTmp) {
-  if (background || !dataTmp || !tremMaster) return;
-  if (!map || !map.getSource("TREMRTS_points")) return;
-  var reported = new Set();
-
-  Object.keys(dataTmp).forEach(function (code) {
-    var i = tremIndexByCode.get(code);
-    if (i === undefined) return; //マスタに無い点は main 側でマスタ再取得を促している
-    var v = dataTmp[code];
-    reported.add(i);
-    var prev = tremPrevValues.get(i);
-    if (!tremForceAll && prev && prev[0] === v[0] && prev[1] === v[1] && prev[2] === v[2] && prev[3] === v[3] && prev[4] === v[4]) return;
-    map.setFeatureState({ source: "TREMRTS_points", id: i }, { valid: 1, shindo: v[0], pga: v[1], r: v[2], g: v[3], b: v[4] });
-    tremPrevValues.set(i, v);
-  });
-  //前回報告があり今回無い点は非表示にする
-  tremPrevReported.forEach(function (i) {
-    if (!reported.has(i)) {
-      map.setFeatureState({ source: "TREMRTS_points", id: i }, { valid: 0 });
-      tremPrevValues.delete(i);
+  if (background) return;
+  if (!map) return;
+  Object.keys(dataTmp).forEach(function (key) {
+    TREMRTS_LastUpdate[key] = new Date();
+    var elm = dataTmp[key];
+    var currentState = map.getFeatureState({ source: "TREMRTS_points", id: elm.Code });
+    var isVisible = true;//TREM-RTSではエントリ有⇔データ有
+    if (currentState.shindo !== elm.shindo || currentState.visible !== isVisible) {
+      map.setFeatureState(
+        {
+          source: "TREMRTS_points",
+          id: elm.Code
+        },
+        {
+          visible: true,
+          rgb_r: elm?.rgb?.[0],
+          rgb_g: elm?.rgb?.[1],
+          rgb_b: elm?.rgb?.[2],
+          PGA: elm.PGA,
+          shindo: elm.shindo,
+        }
+      );
+    }
+    if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) {
+      kmoni_popup[elm.Code].setHTML(generatePopupContent_TREM(elm));
     }
   });
-  tremPrevReported = reported;
-  tremForceAll = false;
-
-  //開いているポップアップのみ更新
-  for (const code of Object.keys(kmoni_popup)) {
-    var i = tremIndexByCode.get(code);
-    if (i === undefined) continue;
-    var popup = kmoni_popup[code];
-    var params = TREMRTSPointParams(i);
-    if (popup && popup.isOpen() && params) popup.setHTML(generatePopupContent_TREM(params));
-  }
-}
-
-/**
- * index からポップアップ用パラメータを組み立てる。未報告なら null
- * @param {number} i index
- * @returns {{Code:string, Type:string, shindo:number, PGA:number, rgb:number[]}|null}
- */
-function TREMRTSPointParams(i) {
-  if (!tremMaster || typeof i !== "number" || i < 0 || i >= tremMaster.length) return null;
-  var v = TREMRTS_TMP ? TREMRTS_TMP[tremMaster[i].Code] : null;
-  if (!v) return null;
-  return { Code: tremMaster[i].Code, Type: "TREMRTS", shindo: v[0], PGA: v[1], rgb: [v[2], v[3], v[4]] };
 }
 
 function generatePopupContent_SEISJS(params) {
-  var shindoColor = NormalizeShindo(params.shindo, 2);
-  if (!Array.isArray(params.rgb)) params.rgb = JSON.parse(params.rgb);
-  return `<h3 class= 'PointName' style='border-bottom-color:rgb(${params.rgb.join(",")})'> ${params.Name}
-    <span> ${params.Code}</span></h3>
-      <div class='popupContentWrap'><div class='obsShindoWrap' style='background:${shindoColor[0]};color:${shindoColor[1]};'>震度 ${NormalizeShindo(params.shindo, 1)}
-        <span>${params.shindo.toFixed(2)}</span></div>
-        <div class='obsPGAWrap'>PGA ${(Math.floor(params.PGA * 100) / 100).toFixed(2)}</div></div>`;
+  if (!map?.style?._loaded) return "";
+  var state = map.getFeatureState({ source: "SEISJS_points", id: params.Code });
+
+  var shindoColor = NormalizeShindo(state.shindo, 2);
+  var rgb = `${state.rgb_r || 0},${state.rgb_g || 0},${state.rgb_b || 0}`;
+
+  return `<h3 class='PointName' style='border-bottom-color:rgb(${rgb})'>${params.Name}
+    <span>${params.Type}_${params.Code.slice(0, 5)}</span></h3>
+      <div class='popupContentWrap'><div class='obsShindoWrap' style='background:${shindoColor[0]};color:${shindoColor[1]};'>震度 ${NormalizeShindo(state.shindo, 1)}
+        <span>${Number(state.shindo || 0).toFixed(2)}</span></div>
+        <div class='obsPGAWrap'>PGA ${Number(state.PGA).toFixed(2)}</div></div>`;
 }
 
+var SeisJS_LastUpdate = {};
 function SeisJSUpdate(dataTmp) {
-  if (!background) {
-    var geojson = { type: "FeatureCollection", features: [] };
-    Object.keys(dataTmp).forEach(function (key) {
-      var elm = dataTmp[key];
-      geojson.features.push({
-        type: "Feature",
-        properties: {
-          Code: elm.Code,
-          IsSuspended: elm.IsSuspended,
-          Name: elm.Name,
-          Region: elm.Region,
-          Type: elm.Type,
+  if (background) return;
+  if (!map) return;
+
+  Object.keys(dataTmp).forEach(function (key) {
+    SeisJS_LastUpdate[key] = new Date();
+    var elm = dataTmp[key];
+    var currentState = map.getFeatureState({ source: "SEISJS_points", id: elm.Code });
+    var isVisible = true;//SeisJSではエントリ有⇔データ有
+    if (currentState.shindo !== elm.shindo || currentState.visible !== isVisible) {
+      map.setFeatureState(
+        {
+          source: "SEISJS_points",
+          id: elm.Code
+        },
+        {
+          visible: true,
+          rgb_r: elm?.rgb?.[0],
+          rgb_g: elm?.rgb?.[1],
+          rgb_b: elm?.rgb?.[2],
           PGA: elm.PGA,
-          rgb: elm.rgb,
           shindo: elm.shindo,
-        },
-        geometry: {
-          type: "Point",
-          coordinates: [elm.Location.Longitude, elm.Location.Latitude],
-        },
-      });
-      if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) {
-        kmoni_popup[elm.Code].setHTML(generatePopupContent_SEISJS(elm));
-      }
-    });
-    if (map) map.getSource("SEISJS_points").setData(geojson);
-  }
+        }
+      );
+    }
+    if (kmoni_popup[elm.Code] && kmoni_popup[elm.Code].isOpen()) {
+      kmoni_popup[elm.Code].setHTML(generatePopupContent_SEISJS(elm));
+    }
+  });
 }
+
+//最終受信が古い点を削除
+setInterval(function () {
+  Object.keys(SeisJS_LastUpdate).forEach(function (key) {
+    var val = SeisJS_LastUpdate[key];
+    if (new Date() - val > 2000) {
+      if (map?.style?._loaded) {
+        map.setFeatureState(
+          {
+            source: "SEISJS_points",
+            id: key
+          },
+          {
+            visible: false,
+          }
+        );
+      }
+      delete SeisJS_LastUpdate[key];
+    }
+  });
+  Object.keys(TREMRTS_LastUpdate).forEach(function (key) {
+    var val = TREMRTS_LastUpdate[key];
+    if (new Date() - val > 2000) {
+      if (map?.style?._loaded) {
+        map.setFeatureState(
+          {
+            source: "TREMRTS_points",
+            id: key
+          },
+          {
+            visible: false,
+          }
+        );
+      }
+      delete TREMRTS_LastUpdate[key];
+    }
+  });
+
+}, 3000)
 
 var Int0T = ["any"], Int1T = ["any"], Int2T = ["any"], Int3T = ["any"], Int4T = ["any"], Int5mT = ["any"], Int5pT = ["any"], Int6mT = ["any"], Int6pT = ["any"], Int7T = ["any"], AlertT = ["any"];
 
@@ -2261,7 +1736,7 @@ function JMAEstShindoDraw() {
 //🔴予報円🔴
 //予報円追加
 function psWaveEntry() {
-  //EEW があれば予報円アニメーションを（停止していれば）再開する
+  //EEW があれば予報円アニメーションを（停止していれば）再開する（fork 独自。Issue #23）
   if (current_EEW.some(function (elm) { return !elm.is_cancel; })) psWaveAnmStart();
   current_EEW.forEach(function (elm) {
     if (!elm.is_cancel && elm.arrivalTime) {
@@ -2314,19 +1789,25 @@ function psWaveEntry() {
       return elm2.EventID == elm.id;
     });
     if (!stillEEW || stillEEW.is_cancel) {
-      if (map.getLayer(`PCircle_${elm.id}`)) map.removeLayer(`PCircle_${elm.id}`);
-      if (map.getLayer(`SCircle_${elm.id}`)) map.removeLayer(`SCircle_${elm.id}`);
-      if (map.getLayer(`SCircle_${elm.id}_FILL`)) map.removeLayer(`SCircle_${elm.id}_FILL`);
+      if (map?.getLayer(`PCircle_${elm.id}`)) map.removeLayer(`PCircle_${elm.id}`);
+      if (map?.getLayer(`SCircle_${elm.id}`)) map.removeLayer(`SCircle_${elm.id}`);
+      if (map?.getLayer(`SCircle_${elm.id}_FILL`)) map.removeLayer(`SCircle_${elm.id}_FILL`);
 
-      if (map.getSource(`PCircle_${elm.id}`)) map.removeSource(`PCircle_${elm.id}`);
-      if (map.getSource(`SCircle_${elm.id}`)) map.removeSource(`SCircle_${elm.id}`);
+      if (map?.getSource(`PCircle_${elm.id}`)) map.removeSource(`PCircle_${elm.id}`);
+      if (map?.getSource(`SCircle_${elm.id}`)) map.removeSource(`SCircle_${elm.id}`);
       if (elm.SIElm) elm.SIElm.remove();
+      return false;
     }
-    return stillEEW;
+    return true;
   });
 }
 //予報円半径計算
 function psWaveCalc(eid) {
+  var stillEEW = current_EEW.find(function (elm) {
+    return elm.EventID == eid;
+  });
+  if (stillEEW && stillEEW.is_cancel) return;
+
   var pswaveFind = psWaveList.find(function (elm2) {
     return elm2.id == eid;
   });
@@ -2404,17 +1885,26 @@ let circle_options = { steps: 80, units: "kilometers" };
 //予報円描画
 function psWaveReDraw(EventID, latitude, longitude, pRadius, sRadius, SnotArrived, SArriveTime, nowDistance) {
   if (!map) return;
-  var EQElm = psWaveList.find(function (elm) {
-    return elm.id == EventID;
-  });
   var EQElm2 = current_EEW.find(function (elm) {
     return elm.EventID == EventID;
   });
+  if (EQElm2 && EQElm2.is_cancel) {
+    if (map.getLayer(`PCircle_${EventID}`)) map.removeLayer(`PCircle_${EventID}`);
+    if (map.getLayer(`SCircle_${EventID}`)) map.removeLayer(`SCircle_${EventID}`);
+    if (map.getLayer(`SCircle_${EventID}_FILL`)) map.removeLayer(`SCircle_${EventID}_FILL`);
+    if (map.getSource(`PCircle_${EventID}`)) map.removeSource(`PCircle_${EventID}`);
+    if (map.getSource(`SCircle_${EventID}`)) map.removeSource(`SCircle_${EventID}`);
+    return;
+  }
+  var EQElm = psWaveList.find(function (elm) {
+    return elm.id == EventID;
+  });
   if (EQElm) {
     let _center = turf.point([longitude, latitude]);
-    var limit_n = turf.lineString([[-180, 83], [180, 83]]);//Webメルカトルの北端（85.051+マージン）
-    var limit_s = turf.lineString([[-180, -83], [180, -83]]);//Webメルカトルの南端（85.051+マージン）
-    var limitOfRadius = 1000 * Math.min(turf.pointToLineDistance(_center, limit_n, { units: "kilometers" }), turf.pointToLineDistance(_center, limit_s, { units: "kilometers" }));
+    var limitOfRadius = 1000 * Math.min(
+      turf.distance(_center, [longitude, 83], { units: "kilometers" }),//Webメルカトルの北端（85.051+マージン）
+      turf.distance(_center, [longitude, -83], { units: "kilometers" })//Webメルカトルの南端（85.051+マージン）
+    );
 
     if (map && map.getSource(`PCircle_${EventID}`)) {
       var PCircleElm = map.getSource(`PCircle_${EventID}`);
@@ -2492,10 +1982,7 @@ function psWaveReDraw(EventID, latitude, longitude, pRadius, sRadius, SnotArrive
         "tsunami_Yoho"
       );
 
-      var ZoomBounds = new maplibregl.LngLatBounds();
-      ZoomBounds.extend(_center);
-      ZoomBounds.extend(turf.bbox(p_geometry));
-      ZoomBounds.extend(turf.bbox(s_geometry));
+      var ZoomBounds = turf.bbox(turf.featureCollection([_center, p_geometry, s_geometry]));
 
       map.setMaxZoom(8);
       map.fitBounds(ZoomBounds, {
@@ -2588,10 +2075,12 @@ var tsunamiData;
 var tsunamiSTMarkers = [];
 function tsunamiDataUpdate(data) {
   tsunamiData = data;
-  map.setFilter("tsunami_MajorWarn", ["==", "name", ""]);
-  map.setFilter("tsunami_Warn", ["==", "name", ""]);
-  map.setFilter("tsunami_Watch", ["==", "name", ""]);
-  map.setFilter("tsunami_Yoho", ["==", "name", ""]);
+  if (map) {
+    map.setFilter("tsunami_MajorWarn", ["==", "name", ""]);
+    map.setFilter("tsunami_Warn", ["==", "name", ""]);
+    map.setFilter("tsunami_Watch", ["==", "name", ""]);
+    map.setFilter("tsunami_Yoho", ["==", "name", ""]);
+  }
   Tsunami_MajorWarning = Tsunami_Warning = Tsunami_Watch = Tsunami_Yoho = false;
 
   document.getElementById("tsunamiCancel").style.display = data.Torikeshi ? "block" : "none";
@@ -2608,9 +2097,10 @@ function tsunamiDataUpdate(data) {
   if (data.cancelled || data.revocation || data.Torikeshi) {
     document.getElementById("tsunamiWrap").style.display = "none";
     document.body.classList.remove("TsunamiMode");
+    tsunamiData = null;
   } else {
     EQInfoLink.style.display = "none";
-    if (Array.isArray(data.issue.EventID) && data.issue.EventID.length) {
+    if (Array.isArray(data.issue?.EventID) && data.issue.EventID.length) {
       var link = [];
       EQinfo_Index = 0;
       document.getElementById("EQCount").innerText =
@@ -2633,8 +2123,8 @@ function tsunamiDataUpdate(data) {
         GenerateTsunamiText(data, "津波情報アイテム。情報内容を読み上げます。{max_grade}発令中。[{home_area}には{home_grade}が発表。{home_area}への{first_height2}、最大波予想は{max_height2}。{immediately}]{report_time}発表。")
       );
     if (config.home.TsunamiSect) {
-      var sectData = data.areas.find(function (elm) {
-        return elm.name == config.home.TsunamiSect;
+      var sectData = data.areas?.find(function (elm) {
+        return elm.name == config.home.TsunamiSect && !elm.cancelled;
       });
       if (sectData) {
         switch (sectData.grade) {
@@ -2698,7 +2188,7 @@ function tsunamiDataUpdate(data) {
     var WatchList = ["any"];
     var YohoList = ["any"];
 
-    data.areas.forEach(function (elm) {
+    (data.areas || []).forEach(function (elm) {
       if (!elm.cancelled) {
         alertNowTmp = true;
         switch (elm.grade) {
@@ -2726,20 +2216,20 @@ function tsunamiDataUpdate(data) {
           var st = tsunamiStations[elm2.code];
           if (st) {
             if (elm2.omaxHeight) {
-              var omaxHeight = Number(
+              var omaxHeightNum = Number(
                 elm2.omaxHeight.replace("m", "").replace("以上", "")
               );
 
-              if (omaxHeight < 0.2) {
+              if (omaxHeightNum < 0.2) {
                 var classname = "TsunamiST02";
                 var color = config.color.Tsunami.TsunamiYohoColor;
-              } else if (omaxHeight <= 1) {
+              } else if (omaxHeightNum <= 1) {
                 var classname = "TsunamiST10";
                 var color = config.color.Tsunami.TsunamiWatchColor;
-              } else if (omaxHeight <= 3) {
+              } else if (omaxHeightNum <= 3) {
                 var classname = "TsunamiST30";
                 var color = config.color.Tsunami.TsunamiWarningColor;
-              } else if (omaxHeight > 3) {
+              } else if (omaxHeightNum > 3) {
                 var classname = "TsunamiST99";
                 var color = config.color.Tsunami.TsunamiMajorWarningColor;
               }
@@ -2788,12 +2278,21 @@ function tsunamiDataUpdate(data) {
               if (omaxHeight) omaxHeight = `観測最大波：${omaxHeight}`;
               if (elm2.maxHeightRising) omaxHeight += " （上昇中）";
 
-              if (elm2.ArrivedTime) ArrivedTime = `第１波観測時刻：${NormalizeDate(10, elm2.ArrivedTime)}`;
-              else if (elm2.Condition == "第１波の到達を確認") ArrivedTime = "第1波到達";
-              else if (elm2.Condition == "津波到達中と推測") ArrivedTime = "津波到達中と推測";
-              else if (elm2.firstHeightCondition == "第１波識別不能") ArrivedTime = "第1波識別不能";
+              if (elm2.ArrivedTime) {
+                ArrivedTime = `第１波観測時刻：${NormalizeDate(10, elm2.ArrivedTime)}`;
+              } else if (elm2.firstHeightCondition == "欠測") {
+                ArrivedTime = "第1波欠測";
+              } else if (elm2.Condition == "第１波の到達を確認") {
+                ArrivedTime = "第1波到達";
+              } else if (elm2.Condition == "津波到達中と推測") {
+                ArrivedTime = "津波到達中と推測";
+              } else if (elm2.firstHeightCondition == "第１波識別不能") {
+                ArrivedTime = "第1波識別不能";
+              }
 
-              if (elm2.firstHeightInitial) ArrivedTime += ` ${elm2.firstHeightInitial}`;
+              if (elm2.firstHeightInitial && ArrivedTime) {
+                ArrivedTime += ` ${elm2.firstHeightInitial}`;
+              }
               if (elm2.ArrivalTime) arrivalTime = `第1波予想：${NormalizeDate(10, elm2.ArrivalTime)}`;
 
               var content = [arrivalTime, omaxHeight, ArrivedTime, HighTideDateTime, condition]
@@ -2815,19 +2314,22 @@ function tsunamiDataUpdate(data) {
       }
     });
 
-    map.setFilter("tsunami_MajorWarn", MajorWarningList);
-    map.setFilter("tsunami_Warn", WarningList);
-    map.setFilter("tsunami_Watch", WatchList);
-    map.setFilter("tsunami_Yoho", YohoList);
+    if (map) {
+      map.setFilter("tsunami_MajorWarn", MajorWarningList);
+      map.setFilter("tsunami_Warn", WarningList);
+      map.setFilter("tsunami_Watch", WatchList);
+      map.setFilter("tsunami_Yoho", YohoList);
+    }
 
     if (data.revocation) {
       document.getElementById("tsunamiWrap").style.display = "none";
       document.body.classList.remove("TsunamiMode");
-      Tsunami_MajorWarning = Tsunami_Warning = Tsunami_Watch = false;
+      tsunamiData = null;
+      Tsunami_MajorWarning = Tsunami_Warning = Tsunami_Watch = Tsunami_Yoho = false;
     } else if (!alertNowTmp && tsunamiAlertNow) {
       document.getElementById("tsunamiWrap").style.display = "none";
       document.body.classList.remove("TsunamiMode");
-      Tsunami_MajorWarning = Tsunami_Warning = Tsunami_Watch = false;
+      Tsunami_MajorWarning = Tsunami_Warning = Tsunami_Watch = Tsunami_Yoho = false;
     }
     tsunamiAlertNow = alertNowTmp;
 
@@ -2849,15 +2351,12 @@ function tsunamiDataUpdate(data) {
       document.getElementById("tsunamiTitle").style.borderColor = tsunamiColorConv("Yoho");
   }
   EQinfo_Index = 0;
-
-  //警報・注意報・予報が全て解除（または取消）されたら点滅 interval のゲートを閉じる（Issue #23）
-  if (!Tsunami_MajorWarning && !Tsunami_Warning && !Tsunami_Watch && !Tsunami_Yoho) tsunamiData = null;
 }
 
 var EQinfo_Index = 0;
 EQInfoLink.addEventListener("click", function (e) {
   e.preventDefault();
-  if (EQInfoLink?.dataset?.eventid) return;
+  if (!EQInfoLink?.dataset?.eventid) return;
   var EIDs = EQInfoLink.dataset.eventid.split(",");
   EIDs.forEach(function (elm, index) {
     if (elm) var EQItemElm = document.querySelector(elm);
@@ -2902,9 +2401,8 @@ function tsunamiColorConv(str) {
 }
 
 function tsunamiPopup(e) {
-  if (e.originalEvent.cancelBubble) return;
-
-  if (tsunamiData && tsunamiData.areas) {
+  if (e.originalEvent?.cancelBubble) return;
+  if (tsunamiData?.areas) {
     var elm = tsunamiData.areas.find(function (elm) {
       return elm.name == e.features[0].properties.name;
     });
@@ -2932,16 +2430,35 @@ function tsunamiPopup(e) {
         var firstCondition = "";
         if (elm.firstHeight) {
           firstWave = `<div>第１波予想:${NormalizeDate(10, elm.firstHeight)}</div>`;
+          if (elm.firstHeightCondition == "早いところでは既に津波到達と推定") {
+            firstCondition = "<div>早いところでは到達と推定</div>";
+          } else if (elm.firstHeightCondition) {
+            firstCondition = `<div>${elm.firstHeightCondition}</div>`;
+          }
+        } else if (elm.firstHeightCondition) {
+          if (elm.firstHeightCondition == "第１波の到達を確認") {
+            firstWave = "<div>第１波:到達</div>";
+          } else if (elm.firstHeightCondition == "津波到達中と推測") {
+            firstWave = "<div>第１波:到達中と推測</div>";
+          } else {
+            firstWave = `<div>第１波:${elm.firstHeightCondition}</div>`;
+          }
         }
 
-        if (elm.maxHeight) maxWave = `<div>最大波予想:${elm.maxHeight}</div>`;
-        else if (elm.grade == "Yoho") maxWave = "<div>最大波予想:若干の海面変動</div>";
-
-        if (elm.firstHeightCondition) {
-          firstCondition = `<div>${elm.firstHeightCondition}</div>`;
+        if (elm.maxHeight) {
+          var maxHeight = String(elm.maxHeight);
+          if (maxHeight.match(/未満/)) {
+            maxHeight = `<${maxHeight.replace("未満", "")}`;
+          } else if (maxHeight.match(/超/)) {
+            maxHeight = `>${maxHeight.replace("超", "")}`;
+          }
+          maxWave = `<div>最大波予想:${maxHeight}</div>`;
+        } else if (elm.grade == "Yoho") {
+          maxWave = "<div>最大波予想:若干の海面変動</div>";
         }
 
-        var popupContent = `<h3 style='border-bottom:solid 2px ${tsunamiColorConv(elm.grade)}'>${elm.name}</h3><div class='tsunamidetailwrap'><p>${gradeJa} 発令中</p>${firstWave}${maxWave}${firstCondition}</div>`;
+        var statusJa = elm.grade == "Yoho" ? `${gradeJa} 発表中` : `${gradeJa} 発令中`;
+        var popupContent = `<h3 style='border-bottom:solid 2px ${tsunamiColorConv(elm.grade)}'>${elm.name}</h3><div class='tsunamidetailwrap'><p>${statusJa}</p>${firstWave}${maxWave}${firstCondition}</div>`;
         new maplibregl.Popup().setLngLat(e.lngLat).setHTML(popupContent).addTo(map);
       }
     }
@@ -2960,11 +2477,7 @@ function NankaiTroughInfo(data) {
 
     var serialStr = data.rinji.Serial ? `<span class='nankai_serial'>#${data.rinji.Serial}</span>` : "";
 
-    if (data.rinji.reportKind == "取消") {
-      document.getElementById("NankaiTroughInfo_Rinji").classList.add("torikeshi")
-    } else {
-      document.getElementById("NankaiTroughInfo_Rinji").classList.remove("torikeshi")
-    }
+    document.getElementById("NankaiTroughInfo_Rinji").classList.toggle("torikeshi", data.rinji.reportKind == "取消")
 
     var kindStr = data.rinji.kind;
     if (data.rinji.reportKind == "取消") kindStr = "取消"
@@ -2996,11 +2509,7 @@ function NankaiTroughInfo(data) {
 
     var serialStr = data.teirei.Serial ? `<span class='nankai_serial'>#${data.teirei.Serial}</span>` : "";
 
-    if (data.teirei.reportKind == "取消") {
-      document.getElementById("NankaiTroughInfo_Teirei").classList.add("torikeshi")
-    } else {
-      document.getElementById("NankaiTroughInfo_Teirei").classList.remove("torikeshi")
-    }
+    document.getElementById("NankaiTroughInfo_Teirei").classList.toggle("torikeshi", data.teirei.reportKind == "取消");
 
     var kindStr = data.teirei.kind;
     if (data.teirei.reportKind == "取消") kindStr = "取消"
@@ -3036,8 +2545,7 @@ function HokkaidoSanrikuInfo(data) {
   if (data) {
     document.getElementById("HokkaidoSanrikuInfo").style.display = "block";
 
-    if (data.kind == "取消") document.getElementById("HokkaidoSanrikuInfo").classList.remove("happyo")
-    else document.getElementById("HokkaidoSanrikuInfo").classList.add("happyo")
+    document.getElementById("HokkaidoSanrikuInfo").classList.toggle("happyo", data.kind !== "取消");
 
     document.getElementById("HokkaidoSanrikuInfo")
       .setAttribute("title", `クリックして詳細を表示\n${data.HeadLine}`);
@@ -3097,7 +2605,7 @@ function draw_tide(data) {
     document.getElementById("tide_update_time").innerText = `更新：${NormalizeDate("hh:mm:ss")}`;
     document.getElementById("tide_update_time").setAttribute("aria-label", `更新時刻、${NormalizeDate("h時m分s秒")}`);
   }
-  removeChild(document.getElementById("tide-Wrap"));
+  document.getElementById("tide-Wrap")?.replaceChildren();
 
   //データバーの表示範囲をそろえるため事前にループ
   var range_min = 0
@@ -3124,14 +2632,14 @@ function draw_tide(data) {
 
     if (index == 0) clone.setAttribute("tabindex", 2);
 
-    var dateToSpeak = NormalizeDate("M月D日h時m分", elm.time);
-    var dateStr = NormalizeDate("MM/DD hh:mm", elm.time);
+    var dateToSpeak = elm.time ? NormalizeDate("M月D日h時m分", elm.time) : "不明な時刻";
+    var dateStr = elm.time ? NormalizeDate("MM/DD hh:mm", elm.time) : "--/-- --:--";
     clone.querySelector(".EQI_datetime").textContent = dateStr;
 
     clone.querySelector(".EQI_name").textContent = elm.name;
     clone.querySelector(".EQI_by").textContent = `(${elm.by})`;
 
-    clone.querySelector(".EQI_height").textContent = elm.height.toFixed(0);
+    clone.querySelector(".EQI_height").textContent = (elm.height != null && !isNaN(elm.height)) ? elm.height.toFixed(0) : "-";
 
     function to_percent(v) {
       return (v || v == 0) ? (v - range_min) / (range_max - range_min) * 100 : null
@@ -3146,7 +2654,7 @@ function draw_tide(data) {
     clone.querySelector(".EQI_point_adv").style.display = (elm.threshold_advisory || elm.threshold_advisory == 0) ? "block" : "none";
     clone.querySelector(".EQI_point_warn").style.display = (elm.threshold_warn || elm.threshold_warn == 0) ? "block" : "none";
 
-    clone.setAttribute("aria-label", `潮位観測情報、観測点名は${elm.name} (${elm.by})。潮位${Boolean2(elm.height) ? `${elm.height.toFixed(0)}センチ` : "不明"}、${dateToSpeak} 時点。なお、天文潮位は${elm.astro} センチ、高潮注意報基準は${elm.threshold_advisory} センチ、高潮警報基準は${elm.threshold_warn} センチ。クリックして詳細を表示。`);
+    clone.setAttribute("aria-label", `潮位観測情報、${elm.by}の${elm.name}観測点では、潮位${Boolean2(elm.height) ? `${elm.height.toFixed(0)}センチ` : "不明"}、${dateToSpeak}時点。なお、天文潮位は${elm.astro}センチ、レベル4危険警報基準は${elm.threshold_advisory}センチ、レベル5特別警報基準は${elm.threshold_warn}センチ。クリックして詳細を表示。`);
     clone.addEventListener("click", function () {
       if (data?.[key]?.code) {
         window.open(`https://www.jma.go.jp/bosai/tidelevel/#point_code=${data[key].code}`);
@@ -3171,7 +2679,7 @@ var gaikyo_lastUpdate = 0;
 var gaikyo_history = [];
 function draw_gaikyo(data) {
   gaikyo_lastUpdate = new Date();
-  removeChild(document.getElementById("gaikyo-Wrap"));
+  document.getElementById("gaikyo-Wrap")?.replaceChildren();
   if (!data || data.length == 0) {
     document.getElementById("gaikyo_update_time").innerText = `更新失敗：${NormalizeDate("hh:mm:ss")}`;
     return;
@@ -3193,7 +2701,7 @@ function draw_gaikyo(data) {
       } else {
         var startDateToSpeak = elm.date0 ? `${NormalizeDate("YY年M月D日", elm.date0)}から` : "";
         var startDateStr = elm.date0 ? `${NormalizeDate("YYYY/MM/DD", elm.date0)}～` : "";
-        if (!elm.date0 || elm.date0.getFullYear() != elm.date.getFullYear()) {
+        if (!elm.date0 || !elm.date || elm.date0.getFullYear() != elm.date.getFullYear()) {
           var dateFormToSpeak = "YY年M月D日";
           var dateFormStr = "YYYY/MM/DD";
         } else {
@@ -3205,7 +2713,7 @@ function draw_gaikyo(data) {
       }
       clone.querySelector(".EQI_datetime").textContent = dateStr;
 
-      clone.setAttribute("aria-label", `気象庁による解説情報：${elm.title}、${dateToSpeak}`);
+      clone.setAttribute("aria-label", `気象庁の解説情報：${elm.title}、${dateToSpeak}`);
       clone.addEventListener("click", function () {
         window.open(elm.url);
       });
@@ -3217,7 +2725,7 @@ function draw_gaikyo(data) {
 var wepa_lastUpdate = 0;
 function draw_wepa(data) {
   wepa_lastUpdate = new Date();
-  removeChild(document.getElementById("wepa-Wrap"));
+  document.getElementById("wepa-Wrap")?.replaceChildren();
   if (!data || data.length == 0) {
     document.getElementById("wepa_update_time").innerText = `データがありません：${NormalizeDate("hh:mm:ss")}`;
     return;
@@ -3253,92 +2761,8 @@ function draw_wepa(data) {
 var usgs_lastUpdate = 0;
 
 
-/* ---------- 避難所オーバーレイ: 固定 2 source + 2 layer、タイル LRU キャッシュ（Issue #22） ---------- */
-
-/** 保持するタイル数の上限（超過時は最古タイルの feature を破棄） */
-const HINANJO_TILE_CACHE_MAX = 64;
-/** tileKey → { eq: Feature[], ts: Feature[] }（挿入順 = 古い順） */
-var hinanjoTiles = new Map();
-/** 取得中の tileKey */
-var hinanjoInflight = new Set();
-const HINANJO_LAYERS = [
-  { id: "hinanjo_eq", url: "https://cyberjapandata.gsi.go.jp/xyz/skhb04", color: "#bf8715" },
-  { id: "hinanjo_ts", url: "https://cyberjapandata.gsi.go.jp/xyz/skhb05", color: "#2488c7" },
-];
-
-/**
- * 避難所用の source/layer/click リスナーを 1 回だけ追加する
- */
-function hinanjoInitLayers() {
-  var visible = config.data.overlay.includes("hinanjo") ? "visible" : "none";
-  HINANJO_LAYERS.forEach(function (def) {
-    if (map.getSource(def.id)) return;
-    map.addSource(def.id, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-    map.addLayer({
-      id: def.id,
-      type: "circle",
-      source: def.id,
-      layout: { visibility: visible },
-      paint: {
-        "circle-color": def.color,
-        "circle-radius": 6,
-        "circle-stroke-width": 1,
-        "circle-stroke-color": "#222",
-      },
-      minzoom: 10,
-      maxzoom: 22,
-    });
-    map.on("click", def.id, hinanjoPopup);
-  });
-}
-
-/**
- * タイルの避難所データを取得し、統合ソースへ追加する。同一タイルの重複取得は抑止する。
- * @param {{x:number, y:number, z:number}} ca タイル座標
- */
-function hinanjoLoadTile(ca) {
-  var key = `${ca.z}/${ca.x}/${ca.y}`;
-  if (hinanjoTiles.has(key)) {
-    //LRU: 参照されたタイルを末尾へ
-    var v = hinanjoTiles.get(key);
-    hinanjoTiles.delete(key);
-    hinanjoTiles.set(key, v);
-    return;
-  }
-  if (hinanjoInflight.has(key)) return;
-  hinanjoInflight.add(key);
-
-  Promise.all(HINANJO_LAYERS.map(function (def) {
-    return fetch(`${def.url}/${key}.geojson`)
-      .then(function (r) { return r.ok ? r.json() : { features: [] }; })
-      .then(function (json) { return Array.isArray(json.features) ? json.features : []; })
-      .catch(function () { return []; });
-  })).then(function (results) {
-    hinanjoInflight.delete(key);
-    hinanjoTiles.set(key, { eq: results[0], ts: results[1] });
-    while (hinanjoTiles.size > HINANJO_TILE_CACHE_MAX) {
-      hinanjoTiles.delete(hinanjoTiles.keys().next().value);
-    }
-    hinanjoRefreshSources();
-  });
-}
-
-/**
- * キャッシュ中の全タイルの feature を結合して統合ソースへ setData する
- */
-function hinanjoRefreshSources() {
-  if (!map) return;
-  var eq = [], ts = [];
-  hinanjoTiles.forEach(function (v) {
-    for (const f of v.eq) eq.push(f);
-    for (const f of v.ts) ts.push(f);
-  });
-  map.getSource("hinanjo_eq")?.setData({ type: "FeatureCollection", features: eq });
-  map.getSource("hinanjo_ts")?.setData({ type: "FeatureCollection", features: ts });
-}
-
 function hinanjoPopup(e) {
-  e.originalEvent.cancelBubble = true;
+  e.originalEvent?.stopPropagation();
 
   var DataTmp = e.features[0].properties;
   var supportType = [];
@@ -3365,6 +2789,10 @@ tab1c1.addEventListener('scroll', () => {
     var sortKey = document.getElementById("JMA_EqInfo_Sort").value;
 
     if (sortKey == "t") {//新しい順の時のみさらに読み込む
+      if (document.getElementById("JMA_loading_more").style.display === "block" ||
+        document.getElementById("JMA_loading_status_txt").innerText === "最大件数まで読み込みました") {
+        return;
+      }
       document.getElementById("JMA_loading_status_txt").style.display = "none";
       document.getElementById("JMA_loading_more").style.display = "block";
       window.electronAPI.messageReturn({
@@ -3391,6 +2819,10 @@ tab1c4.addEventListener('scroll', () => {
     var sortKey = document.getElementById("USGS_EqInfo_Sort").value;
 
     if (sortKey == "t") {//新しい順の時のみさらに読み込む
+      if (document.getElementById("USGS_loading_more").style.display === "block" ||
+        document.getElementById("USGS_loading_status_txt").innerText === "最大件数まで読み込みました") {
+        return;
+      }
       document.getElementById("USGS_loading_status_txt").style.display = "none";
       document.getElementById("USGS_loading_more").style.display = "block";
       window.electronAPI.messageReturn({
@@ -3469,7 +2901,7 @@ function GenerateTsunamiText(data, text) {
     var grade_arr = [];
     var homeArea;
     data?.areas?.forEach(function (area) {
-      if (area.grade) grades[area.grade] = true;
+      if (!area.cancelled && area.grade) grades[area.grade] = true;
       if (config.home.TsunamiSect && area.name == config.home.TsunamiSect)
         homeArea = area;
     });
@@ -3550,4 +2982,18 @@ function GenerateTsunamiText(data, text) {
   } catch {
     return "";
   }
+}
+
+//点群を内包する楕円を取得
+//デフォルトでは 1σ（約68%内包）なのでsigmaを乗じて拡大。sigma=2で役95%、3で約99.7%。
+function getEllipseSigma(points) {
+  const sigma = 2;//ここでは95%内包にする
+  const fc = turf.featureCollection(points.map(p => turf.point([p.lon, p.lat])));
+  const { meanCenterCoordinates, semiMajorAxis, semiMinorAxis, angle } =
+    turf.standardDeviationalEllipse(fc).properties.standardDeviationalEllipse;
+
+  return turf.ellipse(meanCenterCoordinates, semiMajorAxis * sigma, semiMinorAxis * sigma, {
+    units: "degrees",
+    angle: angle,
+  });
 }

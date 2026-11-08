@@ -61,14 +61,14 @@ function NormalizeShindo(str, responseType) {
 self.addEventListener("message", (event) => {
   if (event.data.action == "config") {
     config = event.data.config;
-    intColor = true;
+    const getIntColorArr = (str) => NormalizeShindo(str, 2)[0].match(/\d+/g);
     intColor = {
-      4: NormalizeShindo("4", 2)[0].replace("rgb(", "").replace(")", "").replace(" ", "").split(","),
-      "5-": NormalizeShindo("5-", 2)[0].replace("rgb(", "").replace(")", "").replace(" ", "").split(","),
-      "5+": NormalizeShindo("5+", 2)[0].replace("rgb(", "").replace(")", "").replace(" ", "").split(","),
-      "6-": NormalizeShindo("6-", 2)[0].replace("rgb(", "").replace(")", "").replace(" ", "").split(","),
-      "6+": NormalizeShindo("6+", 2)[0].replace("rgb(", "").replace(")", "").replace(" ", "").split(","),
-      7: NormalizeShindo("7", 2)[0].replace("rgb(", "").replace(")", "").replace(" ", "").split(","),
+      4: getIntColorArr("4"),
+      "5-": getIntColorArr("5-"),
+      "5+": getIntColorArr("5+"),
+      "6-": getIntColorArr("6-"),
+      "6+": getIntColorArr("6+"),
+      7: getIntColorArr("7"),
     };
   } else if (event.data.action == "ESMap_canvas") {
     ESMap = event.data.canvas;
@@ -97,19 +97,20 @@ self.addEventListener("message", (event) => {
               var r = imgData[y * 3200 + x * 4];
               var g = imgData[y * 3200 + x * 4 + 1];
               var b = imgData[y * 3200 + x * 4 + 2];
+              let color = null;
 
-              if (r == 250 && g == 230 && b == 150) var color = intColor["4"];
-              else if (r == 255 && g == 230 && b == 0) var color = intColor["5-"];
-              else if (r == 255 && g == 153 && b == 0) var color = intColor["5+"];
-              else if (r == 255 && g == 40 && b == 0) var color = intColor["6-"];
-              else if (r == 165 && g == 0 && b == 33) var color = intColor["6+"];
-              else if (r == 180 && g == 0 && b == 104) var color = intColor["7"];
-              else if (Math.abs(r - 250) < 16 && Math.abs(g - 230) < 16 && Math.abs(b - 150) < 16) var color = intColor["4"];
-              else if (Math.abs(r - 255) < 16 && Math.abs(g - 230) < 16 && b < 16) var color = intColor["5-"];
-              else if (Math.abs(r - 255) < 16 && Math.abs(g - 153) < 16 && b < 16) var color = intColor["5+"];
-              else if (Math.abs(r - 255) < 16 && Math.abs(g - 40) < 16 && b < 16) var color = intColor["6-"];
-              else if (Math.abs(r - 165) < 16 && g < 16 && Math.abs(b - 33) < 16) var color = intColor["6+"];
-              else if (Math.abs(r - 180) < 16 && g < 16 && Math.abs(b - 104) < 16) var color = intColor["7"];
+              if (r == 250 && g == 230 && b == 150) color = intColor["4"];
+              else if (r == 255 && g == 230 && b == 0) color = intColor["5-"];
+              else if (r == 255 && g == 153 && b == 0) color = intColor["5+"];
+              else if (r == 255 && g == 40 && b == 0) color = intColor["6-"];
+              else if (r == 165 && g == 0 && b == 33) color = intColor["6+"];
+              else if (r == 180 && g == 0 && b == 104) color = intColor["7"];
+              else if (Math.abs(r - 250) < 16 && Math.abs(g - 230) < 16 && Math.abs(b - 150) < 16) color = intColor["4"];
+              else if (Math.abs(r - 255) < 16 && Math.abs(g - 230) < 16 && b < 16) color = intColor["5-"];
+              else if (Math.abs(r - 255) < 16 && Math.abs(g - 153) < 16 && b < 16) color = intColor["5+"];
+              else if (Math.abs(r - 255) < 16 && Math.abs(g - 40) < 16 && b < 16) color = intColor["6-"];
+              else if (Math.abs(r - 165) < 16 && g < 16 && Math.abs(b - 33) < 16) color = intColor["6+"];
+              else if (Math.abs(r - 180) < 16 && g < 16 && Math.abs(b - 104) < 16) color = intColor["7"];
 
               if (color) {
                 imgData_out.data[i * 1280 + j * 4] = color[0];
