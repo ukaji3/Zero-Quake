@@ -13,7 +13,7 @@ Terminal=false
 Categories=Utility;Network;
 Keywords=earthquake;tsunami;disaster;防災;地震;津波;緊急地震速報;
 StartupNotify=true
-StartupWMClass=Zero Quake
+StartupWMClass=zeroquake
 MimeType=
 Actions=
 

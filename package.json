@@ -1,6 +1,7 @@
 {
   "name": "zeroquake",
   "productName": "Zero Quake",
+  "desktopName": "zeroquake.desktop",
   "version": "0.9.10",
   "description": "Zero Quake",
   "scripts": {
@@ -13,12 +14,9 @@
   "build": {
     "productName": "Zero Quake",
     "files": [
-      "!CODE_OF_CONDUCT.md",
-      "!CONTRIBUTING.md",
-      "!SECURITY.md",
-      "!PULL_REQUEST_TEMPLATE.md",
-      "!tools/*",
-      "!eslint.config.js"
+      "src/**/*",
+      "LICENSE.md",
+      "THIRD-PARTY-LICENSES.txt"
     ],
     "win": {
       "icon": "src/img/icon.ico",
@@ -55,15 +53,14 @@
       "desktop": {
         "entry": {
           "Name": "Zero Quake",
-          "Comment": "地震・津波情報表示アプリケーション",
           "GenericName": "Earthquake Information",
           "Keywords": "earthquake;tsunami;disaster;防災;地震;津波",
-          "StartupWMClass": "Zero Quake",
+          "StartupWMClass": "zeroquake",
           "Terminal": "false",
-          "Type": "Application",
-          "Categories": "Utility;Network;"
+          "Type": "Application"
         }
       },
+      "syncDesktopName": true,
       "maintainer": "benidate",
       "vendor": "benidate",
       "synopsis": "地震・津波情報をリアルタイムで表示",
